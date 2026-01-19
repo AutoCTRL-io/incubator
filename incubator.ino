@@ -26,6 +26,11 @@
 #include <esp_system.h>
 
 
+// ===== Configuration - Passwords =====
+// Change these passwords before deploying
+static const char* AP_PASS = "1234";      // Access Point password
+static const char* OTA_PASS = "1234";     // OTA update password
+
 // ===== Pins =====
 #define DHTPIN 4
 #define DHTTYPE DHT22
@@ -37,10 +42,6 @@ static const uint16_t WS_PORT = 81;
 
 // ===== AP Defaults =====
 static const char* AP_SSID = "Incubator";
-static const char* AP_PASS = "1234";
-
-// ===== OTA =====
-static const char* OTA_PASS = "1234";
 
 // ===== Acceptable limits (as requested) =====
 static const float TEMP_MIN_ALLOWED_F = -60.0f;
