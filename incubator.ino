@@ -5,8 +5,8 @@
   - Web UI (minimal) + WiFi config page
   - WebSockets real-time status (event-driven, 1s)
   - Preferences (NVS) for target range + WiFi creds + "Keep AP when connected"
-  - STA (DHCP) + AP fallback (SSID: Incubator, PASS: hookerface)
-  - ArduinoOTA (password: hookerface)
+  - STA (DHCP) + AP fallback (SSID: Incubator, PASS: 1234)
+  - ArduinoOTA (password: 1234)
 
   Libraries (Arduino Library Manager):
     - DHT sensor library (Adafruit)
@@ -37,10 +37,10 @@ static const uint16_t WS_PORT = 81;
 
 // ===== AP Defaults =====
 static const char* AP_SSID = "Incubator";
-static const char* AP_PASS = "hookerface";
+static const char* AP_PASS = "1234";
 
 // ===== OTA =====
-static const char* OTA_PASS = "hookerface";
+static const char* OTA_PASS = "1234";
 
 // ===== Acceptable limits (as requested) =====
 static const float TEMP_MIN_ALLOWED_F = -60.0f;
@@ -941,16 +941,6 @@ void startAP() {
 
 bool connectSTA(uint32_t timeoutMs = 15000) {
   if (staSsid.length() == 0) return false;
-
-  // Set static IP
-  IPAddress staticIP(192, 168, 10, 44);
-  IPAddress gateway(192, 168, 10, 1);
-  IPAddress subnet(255, 255, 255, 0);
-  IPAddress dns(192, 168, 10, 1);
-  
-  if (!WiFi.config(staticIP, gateway, subnet, dns)) {
-    Serial.println("Failed to configure static IP");
-  }
 
   WiFi.begin(staSsid.c_str(), staPass.c_str());
   uint32_t start = millis();
