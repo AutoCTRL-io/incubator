@@ -1,7 +1,7 @@
 # ESP32 Chicken Egg Incubator
 ### John Minton <cjohnweb@gmail.com>
 
-An ESP32-S3 based incubator controller with web interface, real-time sensor monitoring, and automatic temperature control.
+An ESP32-S3 based incubator controller with web interface, real-time sensor monitoring, and automatic temperature control. **Supports multiple bird species including Chicken, Quail, Duck, Turkey, and Goose, plus a Custom mode for any other species or specific temperature requirements.**
 
 ## Features
 
@@ -11,7 +11,7 @@ An ESP32-S3 based incubator controller with web interface, real-time sensor moni
 - **WebSocket Real-time Updates** - Live sensor data streaming
 - **WiFi Configuration** - Easy setup via web interface
 - **OTA Updates** - Over-the-air firmware updates
-- **Multiple Egg Profiles** - Pre-configured settings for different bird species
+- **Multiple Egg Profiles** - Pre-configured settings for different bird species (Chicken, Quail, Duck, Turkey, Goose) plus Custom mode for any species
 - **Temperature Peak Tracking** - Records top temperature peaks over time windows
 - **Dual WiFi Mode** - Access Point + Station mode for always-accessible setup
 
@@ -76,13 +76,16 @@ The device automatically controls the heating element (relay) based on:
 
 ### Egg Profiles
 
-Pre-configured profiles available:
+The incubator supports multiple bird species with optimized temperature ranges:
+
 - **Chicken** - 98.0°F to 100.5°F (default)
 - **Quail** - 99.5°F to 101.0°F
 - **Duck** - 99.5°F to 100.0°F
 - **Turkey** - 99.0°F to 100.0°F
 - **Goose** - 99.0°F to 100.0°F
-- **Custom** - User-defined temperature range
+- **Custom** - User-defined temperature range for any other species or specific requirements
+
+Simply select your desired profile from the web interface, or use Custom mode to set your own temperature range. The device will automatically maintain the selected temperature range throughout the incubation period.
 
 ### OTA Updates
 
