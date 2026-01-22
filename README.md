@@ -1,7 +1,7 @@
 # ESP32 Chicken Egg Incubator
 ### John Minton <cjohnweb@gmail.com>
 
-An ESP32-S3 based incubator controller with web interface, real-time sensor monitoring, and automatic temperature control. **Supports multiple bird species including Chicken, Quail, Duck, Turkey, and Goose, plus a Custom mode for any other species or specific temperature requirements.**
+An ESP32-S3 based incubator controller with web interface, real-time sensor monitoring, and automatic temperature control. **Supports multiple bird species including Chicken, Quail, Duck, Turkey, Goose, and Peacock, plus a Custom mode for any other species or specific temperature requirements.**
 
 ## Features
 
@@ -11,8 +11,9 @@ An ESP32-S3 based incubator controller with web interface, real-time sensor moni
 - **WebSocket Real-time Updates** - Live sensor data streaming
 - **WiFi Configuration** - Easy setup via web interface
 - **OTA Updates** - Over-the-air firmware updates
-- **Multiple Egg Profiles** - Pre-configured settings for different bird species (Chicken, Quail, Duck, Turkey, Goose) plus Custom mode for any species
-- **Temperature Peak Tracking** - Records top temperature peaks over time windows
+- **Multiple Egg Profiles** - Pre-configured settings for different bird species (Chicken, Quail, Duck, Turkey, Goose, Peacock) plus Custom mode for any species
+- **Temperature Peak Tracking** - Records highest temperature peaks for multiple time windows (6h, 3h, 1.5h, 1h, 30m, 15m)
+- **Alarm System** - GPIO-based alarms for temperature and humidity out-of-range conditions
 - **Dual WiFi Mode** - Access Point + Station mode for always-accessible setup
 
 ## Hardware Requirements
@@ -31,6 +32,8 @@ An ESP32-S3 based incubator controller with web interface, real-time sensor moni
 2. **Hardware Connections**
    - DHT22 sensor on GPIO pin 4
    - Relay on GPIO pin 5
+   - Temperature alarm output on GPIO pin 6 (optional - goes HIGH when temp out of range)
+   - Humidity alarm output on GPIO pin 7 (optional - goes HIGH when humidity out of range)
    - 3.3V and ground to DHT22 and Relay
 
 3. **Install Libraries** (via Arduino Library Manager)
@@ -65,7 +68,8 @@ The web interface displays:
 - **Sensor Readings** - Temperature (°F/°C), Humidity (%), Dew Point, Heat Index, Absolute Humidity
 - **Lamp Status** - Visual indicator of heating element state
 - **Temperature Range** - Configured target temperature range
-- **Temperature Peaks** - Top 6 temperature peaks with timestamps
+- **Temperature Peaks** - Highest temperature peaks for multiple time windows (6h, 3h, 1.5h, 1h, 30m, 15m) with timestamps
+- **Visual Status Indicators** - Color-coded temperature and humidity readings (green=in range, yellow=warning, red=alarm)
 
 ### Temperature Control
 
@@ -73,6 +77,11 @@ The device automatically controls the heating element (relay) based on:
 - **Target Minimum** - Relay turns ON when temperature drops below this
 - **Target Maximum** - Relay turns OFF when temperature reaches this
 - **Safety Feature** - Relay turns OFF if sensor readings fail (safety measure)
+
+**Alarm Thresholds:**
+- **Temperature Alarm** - Triggers when temperature is outside target range by more than 0.5°F (GPIO pin 6 goes HIGH)
+- **Humidity Alarm** - Triggers when humidity is outside target range by more than 5% (GPIO pin 7 goes HIGH)
+- Default humidity target range: 40-60% (configurable via preferences)
 
 ### Egg Profiles
 
@@ -83,6 +92,7 @@ The incubator supports multiple bird species with optimized temperature ranges:
 - **Duck** - 99.5°F to 100.0°F
 - **Turkey** - 99.0°F to 100.0°F
 - **Goose** - 99.0°F to 100.0°F
+- **Peacock** - 99.0°F to 100.0°F
 - **Custom** - User-defined temperature range for any other species or specific requirements
 
 Simply select your desired profile from the web interface, or use Custom mode to set your own temperature range. The device will automatically maintain the selected temperature range throughout the incubation period.

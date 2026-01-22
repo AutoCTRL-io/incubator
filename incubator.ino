@@ -3,7 +3,7 @@
   - DHT22 temp/RH + computed absolute humidity
   - Relay heat control (HIGH = ON)
   - Web UI (minimal) + WiFi config page
-  - WebSockets real-time status (event-driven, 1s)
+  - WebSockets real-time status (event-driven, 2s)
   - Preferences (NVS) for target range + WiFi creds + "Keep AP when connected"
   - STA (DHCP) + AP fallback (SSID: Incubator, PASS: 1234)
   - ArduinoOTA (password: 1234)
@@ -35,6 +35,8 @@ static const char* OTA_PASS = "1234";     // OTA update password
 #define DHTPIN 4
 #define DHTTYPE DHT22
 #define RELAY_PIN 5  // HIGH = heat ON
+#define TEMP_ALARM_PIN 6  // HIGH when temp alarm active
+#define HUMIDITY_ALARM_PIN 7  // HIGH when humidity alarm active
 
 // ===== Timing =====
 static const uint32_t SENSOR_INTERVAL_MS = 2000;  // 1s
@@ -50,6 +52,8 @@ static const float TEMP_MAX_ALLOWED_F = 200.0f;
 // ===== Ideal defaults for hatching chicken eggs =====
 static const float DEFAULT_TMIN_F = 98.0f;
 static const float DEFAULT_TMAX_F = 100.5f;
+static const float DEFAULT_HMIN = 40.0f;  // Target humidity minimum (%)
+static const float DEFAULT_HMAX = 60.0f;  // Target humidity maximum (%)
 
 static const uint8_t MAX_TEMP_PEAKS = 5;
 static const uint32_t TEMP_PEAK_WINDOW_SEC = 6 * 60 * 60;
@@ -73,6 +77,8 @@ bool keepApWhenConnected = true;
 
 float targetMinF = DEFAULT_TMIN_F;
 float targetMaxF = DEFAULT_TMAX_F;
+float targetHMin = DEFAULT_HMIN;
+float targetHMax = DEFAULT_HMAX;
 
 bool relayOn = false;
 bool lastRelayOn = false;
@@ -95,6 +101,7 @@ enum EggProfile : uint8_t {
   PROFILE_DUCK,
   PROFILE_TURKEY,
   PROFILE_GOOSE,
+  PROFILE_PEACOCK,
   PROFILE_CUSTOM
 };
 
@@ -110,6 +117,7 @@ static const ProfilePreset PROFILE_PRESETS[] = {
   { "Duck", 99.5f, 100.0f },
   { "Turkey", 99.0f, 100.0f },
   { "Goose", 99.0f, 100.0f },
+  { "Peacock", 99.0f, 100.0f },
   { "Custom", 98.0f, 100.5f }  // placeholder
 };
 
@@ -148,8 +156,10 @@ String jsonEscape(const String& s) {
 }
 
 String wifiStatusString() {
-  if (WiFi.status() == WL_CONNECTED) return "CONNECTED";
-  return "DISCONNECTED";
+  if (WiFi.status() == WL_CONNECTED) {
+    return WiFi.SSID();
+  }
+  return "";
 }
 
 void recordTempPeak(float tempF) {
@@ -199,9 +209,9 @@ String buildStatusJson() {
   bool apUp = (WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_AP_STA);
   bool staUp = (WiFi.getMode() == WIFI_STA || WiFi.getMode() == WIFI_AP_STA);
 
-  if (apUp && staUp) mode = "AP+STA";
+  if (apUp && staUp) mode = "AP + WiFi";
   else if (apUp) mode = "AP";
-  else if (staUp) mode = "STA";
+  else if (staUp) mode = "WiFi";
   else mode = "OFF";
 
   String ipSta = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "";
@@ -229,7 +239,9 @@ String buildStatusJson() {
 
   String j = "{";
   j += "\"ws\":\"CONNECTED\"";
-  j += ",\"wifi\":\"" + wifiStatusString() + "\"";
+  String wifiSsid = wifiStatusString();
+  j += ",\"wifi_ssid\":\"" + jsonEscape(wifiSsid) + "\"";
+  j += ",\"wifi_connected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false");
   j += ",\"mode\":\"" + mode + "\"";
   j += ",\"ip_sta\":\"" + ipSta + "\"";
   j += ",\"ip_ap\":\"" + ipAp + "\"";
@@ -240,6 +252,25 @@ String buildStatusJson() {
 
   j += ",\"tmin\":" + String(targetMinF, 2);
   j += ",\"tmax\":" + String(targetMaxF, 2);
+  j += ",\"hmin\":" + String(targetHMin, 1);
+  j += ",\"hmax\":" + String(targetHMax, 1);
+
+  // Calculate alarm status (within 0.5°F for temp, within 5% for humidity)
+  bool tempAlarm = false;
+  bool humidityAlarm = false;
+  if (!isnan(lastTempF) && !isnan(targetMinF) && !isnan(targetMaxF)) {
+    if (lastTempF < (targetMinF - 0.5f) || lastTempF > (targetMaxF + 0.5f)) {
+      tempAlarm = true;
+    }
+  }
+  if (!isnan(lastRH) && !isnan(targetHMin) && !isnan(targetHMax)) {
+    if (lastRH < (targetHMin - 5.0f) || lastRH > (targetHMax + 5.0f)) {
+      humidityAlarm = true;
+    }
+  }
+  
+  j += ",\"temp_alarm\":" + String(tempAlarm ? "true" : "false");
+  j += ",\"humidity_alarm\":" + String(humidityAlarm ? "true" : "false");
 
   j += ",\"temp_f\":" + (isnan(lastTempF) ? "null" : String(lastTempF, 2));
   j += ",\"temp_c\":" + (isnan(lastTempC) ? "null" : String(lastTempC, 2));
@@ -255,6 +286,33 @@ String buildStatusJson() {
   j += ",\"peak_1h\":" + (isnan(peakForWindow(3600)) ? "null" : String(peakForWindow(3600), 2));
   j += ",\"peak_3h\":" + (isnan(peakForWindow(3 * 3600)) ? "null" : String(peakForWindow(3 * 3600), 2));
   j += ",\"peak_6h\":" + (isnan(peakForWindow(6 * 3600)) ? "null" : String(peakForWindow(6 * 3600), 2));
+
+  // Add temp_peaks for different time windows (highest peak in each window)
+  j += ",\"temp_peaks\":[";
+  uint32_t windows[] = {6*3600, 3*3600, 90*60, 3600, 30*60, 15*60}; // 6h, 3h, 1.5h, 1h, 30m, 15m
+  const char* labels[] = {"6h", "3h", "1.5h", "1h", "30m", "15m"};
+  bool first = true;
+  for (uint8_t w = 0; w < 6; w++) {
+    float maxTemp = NAN;
+    time_t maxTs = 0;
+    for (uint8_t i = 0; i < tempPeakCount; i++) {
+      if ((now - tempPeaks[i].ts) <= windows[w]) {
+        if (isnan(maxTemp) || tempPeaks[i].tempF > maxTemp) {
+          maxTemp = tempPeaks[i].tempF;
+          maxTs = tempPeaks[i].ts;
+        }
+      }
+    }
+    if (!first) j += ",";
+    j += "{\"label\":\"" + String(labels[w]) + "\"";
+    if (!isnan(maxTemp)) {
+      j += ",\"temp_f\":" + String(maxTemp, 2);
+      j += ",\"ts\":" + String(maxTs);
+    }
+    j += "}";
+    first = false;
+  }
+  j += "]";
 
   j += "}";
   return j;
@@ -306,7 +364,7 @@ void handleApiProfilePost() {
     return;
   }
 
-  if (profileId < 0 || profileId > PROFILE_CUSTOM) {
+  if (profileId < 0 || profileId > (uint8_t)PROFILE_CUSTOM) {
     server.send(400, "application/json", "{\"ok\":false}");
     return;
   }
@@ -355,7 +413,19 @@ body{
   padding:16px;
   box-shadow:0 10px 30px rgba(0,0,0,.35);
 }
-h1{margin:0 0 12px;font-size:20px}
+h1{
+  margin:0 0 12px;
+  font-size:20px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.header-links{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  font-size:13px;
+}
 .row{
   display:flex;justify-content:space-between;align-items:center;
   padding:6px 0;border-bottom:1px solid var(--border)
@@ -446,6 +516,42 @@ a{color:var(--accent);text-decoration:none;font-size:13px}
   font-variant-numeric:tabular-nums;
   white-space:nowrap;
 }
+.timer-container{
+  position:relative;
+  width:80px;
+  height:80px;
+  display:inline-block;
+  vertical-align:middle;
+}
+.timer-ring{
+  width:80px;
+  height:80px;
+  position:relative;
+}
+.timer-ring svg{
+  position:absolute;
+  top:0;
+  left:0;
+}
+.timer-ring svg circle#progressCircle{
+  will-change:stroke-dashoffset;
+}
+.timer-value{
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  font-size:14px;
+  font-weight:800;
+  font-variant-numeric:tabular-nums;
+  color:var(--text);
+  z-index:1;
+}
+.lamp-row{
+  display:flex;
+  align-items:center;
+  margin-bottom:10px;
+}
 )CSS";
 
 const char JAVASCRIPTS[] PROGMEM = R"JS(
@@ -460,6 +566,11 @@ const uiState = {
 
 let toast, tminEl, tmaxEl;
 let ws = null;
+let timer = 2.0;
+let timerAnimationFrameId = null;
+let timerLastUpdateTime = null;
+let timerRing = null;
+let timerValue = null;
 
 function showToast(){
   toast.classList.add('show');
@@ -476,7 +587,12 @@ function pad2(n){return String(n).padStart(2,'0');}
 function fmtWhen(ts){
   if(!ts) return '—';
   const d = new Date(ts*1000);
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  let hours = d.getHours();
+  const minutes = d.getMinutes();
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  return `${hours}:${pad2(minutes)} ${ampm}`;
 }
 
 function renderPeaks(list){
@@ -490,15 +606,27 @@ function renderPeaks(list){
     return;
   }
 
-  const sorted = list.slice().sort((a,b)=>a.ts-b.ts).slice(-6);
-  el('peakTop').textContent = `${fmt(sorted[sorted.length-1].temp_f,1)}°F`;
+  // Find highest overall peak for the top display
+  let highestPeak = null;
+  for(const p of list){
+    if(p.temp_f != null && (!highestPeak || p.temp_f > highestPeak.temp_f)){
+      highestPeak = p;
+    }
+  }
+  if(highestPeak && highestPeak.temp_f != null){
+    el('peakTop').textContent = `${fmt(highestPeak.temp_f,1)}°F`;
+  }
 
-  for(const p of sorted){
+  // Display each time window peak
+  for(const p of list){
     const r = document.createElement('div');
     r.className = 'peakRow';
+    const label = p.label || '—';
+    const temp = p.temp_f != null ? `${fmt(p.temp_f,1)}°F` : '—';
+    const when = p.ts ? fmtWhen(p.ts) : '—';
     r.innerHTML =
-      `<span class="peakTemp">${fmt(p.temp_f,1)}°F</span>
-       <span class="peakWhen">${fmtWhen(p.ts)}</span>`;
+      `<span class="peakTemp">${label}: ${temp}</span>
+       <span class="peakWhen">${when}</span>`;
     host.appendChild(r);
   }
 }
@@ -507,9 +635,21 @@ function applyStatus(s){
   if(!s) return;
   
   const wsEl = el('ws');
-  if(wsEl) wsEl.textContent = s.ws || '—';
+  if(wsEl){
+    const wsConnected = s.ws === 'CONNECTED';
+    wsEl.textContent = wsConnected ? 'Connected' : 'Disconnected';
+    wsEl.style.color = wsConnected ? 'var(--ok)' : 'var(--bad)';
+  }
   const wifiEl = el('wifi');
-  if(wifiEl) wifiEl.textContent = s.wifi || '—';
+  if(wifiEl){
+    const wifiConnected = s.wifi_connected === true;
+    const wifiSsid = s.wifi_ssid || '';
+    if(wifiSsid){
+      wifiEl.innerHTML = wifiSsid + ' ' + (wifiConnected ? '<span style="color:var(--ok)">✓</span>' : '<span style="color:var(--bad)">✗</span>');
+    }else{
+      wifiEl.innerHTML = '— <span style="color:var(--bad)">✗</span>';
+    }
+  }
   const modeEl = el('mode');
   if(modeEl) modeEl.textContent = s.mode || '—';
   const ipApEl = el('ip_ap');
@@ -519,16 +659,69 @@ function applyStatus(s){
   const macEl = el('mac');
   if(macEl) macEl.textContent = s.mac || '—';
 
+  // Temperature color coding
   const tempFEl = el('temp_f');
-  if(tempFEl) tempFEl.textContent = fmt(s.temp_f);
+  if(tempFEl){
+    tempFEl.textContent = fmt(s.temp_f);
+    if(s.temp_f == null || s.temp_f === undefined || Number.isNaN(s.temp_f)){
+      tempFEl.style.color = 'var(--text)'; // Default color for invalid
+    }else if(s.temp_alarm === true){
+      tempFEl.style.color = 'var(--bad)'; // Red - out of range by >0.5°F
+    }else if(s.temp_f < s.tmin || s.temp_f > s.tmax){
+      tempFEl.style.color = '#ffaa00'; // Yellow - out of target range but within alarm threshold
+    }else{
+      tempFEl.style.color = 'var(--ok)'; // Green - in range
+    }
+  }
   const tempCEl = el('temp_c');
-  if(tempCEl) tempCEl.textContent = fmt(s.temp_c);
+  if(tempCEl){
+    tempCEl.textContent = fmt(s.temp_c);
+    if(s.temp_c == null || s.temp_c === undefined || Number.isNaN(s.temp_c)){
+      tempCEl.style.color = 'var(--text)'; // Default color for invalid
+    }else if(s.temp_alarm === true){
+      tempCEl.style.color = 'var(--bad)'; // Red - out of range by >0.5°F
+    }else{
+      const tminC = (s.tmin - 32) * 5 / 9;
+      const tmaxC = (s.tmax - 32) * 5 / 9;
+      if(s.temp_c < tminC || s.temp_c > tmaxC){
+        tempCEl.style.color = '#ffaa00'; // Yellow - out of target range but within alarm threshold
+      }else{
+        tempCEl.style.color = 'var(--ok)'; // Green - in range
+      }
+    }
+  }
+  
+  // Humidity color coding
   const rhEl = el('rh');
-  if(rhEl) rhEl.textContent = fmt(s.rh,1);
+  if(rhEl){
+    rhEl.textContent = fmt(s.rh,1);
+    if(s.rh == null || s.rh === undefined || Number.isNaN(s.rh)){
+      rhEl.style.color = 'var(--text)'; // Default color for invalid
+    }else if(s.humidity_alarm === true){
+      rhEl.style.color = 'var(--bad)'; // Red - out of range by >5%
+    }else if(s.rh < s.hmin || s.rh > s.hmax){
+      rhEl.style.color = '#ffaa00'; // Yellow - out of target range but within alarm threshold
+    }else{
+      rhEl.style.color = 'var(--ok)'; // Green - in range
+    }
+  }
   const ahEl = el('ah');
   if(ahEl) ahEl.textContent = fmt(s.ah);
+  // Dew point color coding - RED when reached (temp equals or below dew point = condensation)
   const dewFEl = el('dew_f');
-  if(dewFEl) dewFEl.textContent = fmt(s.dew_f);
+  if(dewFEl){
+    dewFEl.textContent = fmt(s.dew_f);
+    if(s.dew_f != null && s.temp_f != null && !Number.isNaN(s.dew_f) && !Number.isNaN(s.temp_f)){
+      // Check if current temp is at or below dew point (within 0.1°F tolerance for floating point)
+      if(s.temp_f <= (s.dew_f + 0.1)){
+        dewFEl.style.color = 'var(--bad)'; // Red when dew point reached (condensation occurring)
+      }else{
+        dewFEl.style.color = 'var(--text)'; // Normal color
+      }
+    }else{
+      dewFEl.style.color = 'var(--text)'; // Default color for invalid
+    }
+  }
   const heatFEl = el('heat_f');
   if(heatFEl) heatFEl.textContent = fmt(s.heat_f);
 
@@ -538,7 +731,12 @@ function applyStatus(s){
   const lampIconEl = el('lampIcon');
   if(lampIconEl) lampIconEl.classList.toggle('on', lampOn);
 
-  const isCustom = (s.profile_id === 5);
+  const isCustom = (s.profile_id === 6);
+
+  const profileSelectEl = el('profileSelect');
+  if(profileSelectEl && profileSelectEl.value != String(s.profile_id)) {
+    profileSelectEl.value = String(s.profile_id);
+  }
 
   const rangeMinEl = el('range_min');
   if(rangeMinEl) rangeMinEl.textContent = fmt(s.tmin,1);
@@ -548,7 +746,10 @@ function applyStatus(s){
   const customRangeEl = el('customRange');
   if(customRangeEl) customRangeEl.style.display = isCustom ? 'block' : 'none';
   const rangeDisplayEl = el('rangeDisplay');
-  if(rangeDisplayEl) rangeDisplayEl.style.display = isCustom ? 'none' : 'flex';
+  if(rangeDisplayEl){
+    rangeDisplayEl.style.display = isCustom ? 'none' : 'flex';
+    rangeDisplayEl.style.justifyContent = 'flex-end';
+  }
 
   uiState.tmin = s.tmin;
   uiState.tmax = s.tmax;
@@ -559,6 +760,9 @@ function applyStatus(s){
   }
 
   renderPeaks(s.temp_peaks || []);
+  
+  // Reset timer on data arrival
+  resetTimer();
 }
 
 function saveCustomRange(){
@@ -567,11 +771,91 @@ function saveCustomRange(){
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
-      profile_id:5,
+      profile_id:6,
       tmin:uiState.tmin,
       tmax:uiState.tmax
     })
   }).then(showToast);
+}
+
+function updateTimerVisual(progress){
+  if(!timerRing) return;
+  let svg = timerRing.querySelector('svg');
+  if(!svg){
+    svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    svg.setAttribute('width','60');
+    svg.setAttribute('height','60');
+    svg.setAttribute('viewBox','0 0 60 60');
+    const circleBg = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    circleBg.setAttribute('cx','30');
+    circleBg.setAttribute('cy','30');
+    circleBg.setAttribute('r','27');
+    circleBg.setAttribute('fill','none');
+    circleBg.setAttribute('stroke','#2a2f36');
+    circleBg.setAttribute('stroke-width','3');
+    const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    circle.setAttribute('cx','30');
+    circle.setAttribute('cy','30');
+    circle.setAttribute('r','27');
+    circle.setAttribute('fill','none');
+    circle.setAttribute('stroke','#4cc9f0');
+    circle.setAttribute('stroke-width','3');
+    circle.setAttribute('stroke-linecap','round');
+    circle.setAttribute('stroke-dasharray','169.65');
+    circle.setAttribute('stroke-dashoffset','169.65');
+    circle.setAttribute('transform','rotate(-90 30 30)');
+    circle.id = 'progressCircle';
+    svg.appendChild(circleBg);
+    svg.appendChild(circle);
+    timerRing.appendChild(svg);
+  }
+  const circle = document.getElementById('progressCircle');
+  if(!circle) return;
+  const circumference = 2 * Math.PI * 27;
+  const offset = circumference - (progress * circumference);
+  circle.setAttribute('stroke-dashoffset',offset.toFixed(2));
+}
+
+function updateTimer(currentTime){
+  if(!timerLastUpdateTime){
+    timerLastUpdateTime = currentTime;
+    timerAnimationFrameId = requestAnimationFrame(updateTimer);
+    return;
+  }
+  const deltaTime = (currentTime - timerLastUpdateTime) / 1000;
+  timerLastUpdateTime = currentTime;
+  timer -= deltaTime;
+  if(timer < 0) timer = 0;
+  if(timerValue){
+    const newText = timer.toFixed(1);
+    if(timerValue.textContent !== newText){
+      timerValue.textContent = newText;
+    }
+  }
+  const progress = Math.max(0,Math.min(1,(2.0 - timer) / 2.0));
+  updateTimerVisual(progress);
+  if(timer <= 0){
+    timer = 0;
+    if(timerAnimationFrameId){
+      cancelAnimationFrame(timerAnimationFrameId);
+      timerAnimationFrameId = null;
+    }
+    timerLastUpdateTime = null;
+  }else{
+    timerAnimationFrameId = requestAnimationFrame(updateTimer);
+  }
+}
+
+function resetTimer(){
+  timer = 2.0;
+  timerLastUpdateTime = null;
+  if(timerValue) timerValue.textContent = '2.0';
+  updateTimerVisual(0);
+  if(timerAnimationFrameId){
+    cancelAnimationFrame(timerAnimationFrameId);
+    timerAnimationFrameId = null;
+  }
+  timerAnimationFrameId = requestAnimationFrame(updateTimer);
 }
 
 function resetDevice(){
@@ -617,10 +901,42 @@ function connectWebSocket(){
   }
 }
 
+function saveProfile(){
+  const profileSelectEl = el('profileSelect');
+  if(!profileSelectEl) return;
+  
+  const profileId = parseInt(profileSelectEl.value);
+  const isCustom = (profileId === 6);
+  
+  // Update UI immediately when Custom is selected
+  const customRangeEl = el('customRange');
+  const rangeDisplayEl = el('rangeDisplay');
+  if(customRangeEl) customRangeEl.style.display = isCustom ? 'block' : 'none';
+  if(rangeDisplayEl) rangeDisplayEl.style.display = isCustom ? 'none' : 'flex';
+  
+  let body = { profile_id: profileId };
+  
+  if(isCustom && tminEl && tmaxEl){
+    body.tmin = parseFloat(tminEl.value);
+    body.tmax = parseFloat(tmaxEl.value);
+  }
+  
+  fetch('/api/profile',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)
+  }).then(showToast);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   toast = el('toast');
   tminEl = el('tmin');
   tmaxEl = el('tmax');
+  timerRing = el('timerRing');
+  timerValue = el('timerValue');
+  
+  const profileSelectEl = el('profileSelect');
+  if(profileSelectEl) profileSelectEl.onchange = saveProfile;
   
   if(tminEl) tminEl.onfocus = () => uiState.editingMin = true;
   if(tmaxEl) tmaxEl.onfocus = () => uiState.editingMax = true;
@@ -637,6 +953,9 @@ document.addEventListener('DOMContentLoaded', () => {
     saveCustomRange();
   };
   
+  // Initialize timer
+  resetTimer();
+  
   connectWebSocket();
 });
 )JS";
@@ -652,42 +971,41 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
 </head>
 <body>
 <div class="card">
-  <h1>🥚 Incubator</h1>
+  <h1>
+    <span>🥚 Incubator</span>
+    <span class="header-links">
+      <a href="/wifi">Settings</a>
+      <a href="#" onclick="resetDevice(); return false;">Reboot</a>
+    </span>
+  </h1>
 
   <!-- System -->
   <div class="row"><span class="label">WiFi</span><span id="wifi" class="value">—</span></div>
   <div class="row"><span class="label">WebSocket</span><span id="ws" class="value">—</span></div>
   <div class="row"><span class="label">Mode</span><span id="mode" class="value">—</span></div>
-  <div class="row"><span class="label">STA IP</span><span id="ip_sta" class="value">—</span></div>
+  <div class="row"><span class="label">Wifi IP</span><span id="ip_sta" class="value">—</span></div>
   <div class="row"><span class="label">AP IP</span><span id="ip_ap" class="value">—</span></div>
   <div class="row"><span class="label">MAC</span><span id="mac" class="value">—</span></div>
 
-  <div style="text-align:right;margin-top:8px;margin-bottom:6px">
-    <a href="/wifi">WiFi Settings</a><br>
-    <a href="#" onclick="resetDevice(); return false;" style="margin-top:4px;display:inline-block">Reboot</a>
-  </div>
-
-  <!-- Metrics -->
-  <div class="grid">
-    <div class="metric"><span class="label">Temp (°F)</span><span id="temp_f" class="value">—</span></div>
-    <div class="metric"><span class="label">Temp (°C)</span><span id="temp_c" class="value">—</span></div>
-    <div class="metric"><span class="label">Humidity (%)</span><span id="rh" class="value">—</span></div>
-    <div class="metric"><span class="label">Abs Hum (g/m³)</span><span id="ah" class="value">—</span></div>
-    <div class="metric"><span class="label">Dew (°F)</span><span id="dew_f" class="value">—</span></div>
-    <div class="metric"><span class="label">HeatIdx (°F)</span><span id="heat_f" class="value">—</span></div>
-
-    <div class="metric wide">
-      <div id="lampIcon" class="lampIcon"></div>
-      <div class="lampText">Lamp <span id="lamp">—</span></div>
-    </div>
-  </div>
 
   <!-- Temperature Range -->
   <div class="mini">
     <div class="miniTitle"><span class="t">Temperature Range</span></div>
 
+    <div style="margin-bottom:8px">
+      <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px">Profile</label>
+      <select id="profileSelect" style="width:100%">
+        <option value="0">Chicken</option>
+        <option value="1">Quail</option>
+        <option value="2">Duck</option>
+        <option value="3">Turkey</option>
+        <option value="4">Goose</option>
+        <option value="5">Peacock</option>
+        <option value="6">Custom</option>
+      </select>
+    </div>
+
     <div id="rangeDisplay" class="row">
-      <span class="label">Configured</span>
       <span class="value">
         <span id="range_min">—</span> – <span id="range_max">—</span> °F
       </span>
@@ -699,10 +1017,31 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
     </div>
   </div>
 
+  <!-- Metrics -->
+  <div class="lamp-row">
+    <div id="timerContainer" class="timer-container">
+      <div id="timerRing" class="timer-ring">
+        <div id="timerValue" class="timer-value">2.0</div>
+      </div>
+    </div>
+    <div class="metric wide" style="flex:1">
+      <div id="lampIcon" class="lampIcon"></div>
+      <div class="lampText">Lamp <span id="lamp">—</span></div>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="metric"><span class="label">Temp (°F)</span><span id="temp_f" class="value">—</span></div>
+    <div class="metric"><span class="label">Temp (°C)</span><span id="temp_c" class="value">—</span></div>
+    <div class="metric"><span class="label">Humidity (%)</span><span id="rh" class="value">—</span></div>
+    <div class="metric"><span class="label">Abs Hum (g/m³)</span><span id="ah" class="value">—</span></div>
+    <div class="metric"><span class="label">Dew (°F)</span><span id="dew_f" class="value">—</span></div>
+    <div class="metric"><span class="label">HeatIdx (°F)</span><span id="heat_f" class="value">—</span></div>
+  </div>
+
   <!-- Peaks -->
   <div class="mini">
     <div class="miniTitle">
-      <span class="t">Top 6 Temp Peaks</span>
+      <span class="t">Temperature Peaks</span>
       <span id="peakTop" class="value">—</span>
     </div>
     <div id="peaks" class="peakList"></div>
@@ -884,7 +1223,14 @@ void loadPrefs() {
     targetMaxF = PROFILE_PRESETS[currentProfile].tmax;
   }
 
-  // 5. WiFi
+  // 5. Load humidity targets if stored
+  bool hasHumidity = prefs.isKey("hmin") && prefs.isKey("hmax");
+  if (hasHumidity) {
+    targetHMin = prefs.getFloat("hmin");
+    targetHMax = prefs.getFloat("hmax");
+  }
+
+  // 6. WiFi
   staSsid = prefs.getString("ssid", "");
   staPass = prefs.getString("pass", "");
   keepApWhenConnected = prefs.getBool("keepap", true);
@@ -904,6 +1250,7 @@ void applyProfile(EggProfile p, float tmin, float tmax) {
   prefs.putUChar("profile", (uint8_t)p);
   prefs.putFloat("tmin", targetMinF);
   prefs.putFloat("tmax", targetMaxF);
+  // Note: Humidity targets are saved separately via saveTargets if needed
 }
 
 void saveTargets(float tmin, float tmax) {
@@ -911,6 +1258,13 @@ void saveTargets(float tmin, float tmax) {
   targetMaxF = tmax;
   prefs.putFloat("tmin", targetMinF);
   prefs.putFloat("tmax", targetMaxF);
+}
+
+void saveHumidityTargets(float hmin, float hmax) {
+  targetHMin = hmin;
+  targetHMax = hmax;
+  prefs.putFloat("hmin", targetHMin);
+  prefs.putFloat("hmax", targetHMax);
 }
 
 void saveWifi(const String& ssid, const String& pass, bool keepAp) {
@@ -943,6 +1297,11 @@ void startAP() {
 bool connectSTA(uint32_t timeoutMs = 15000) {
   if (staSsid.length() == 0) return false;
 
+  // Ensure DHCP is used (no static IP config)
+  // Set hostname before connecting so DHCP server recognizes it
+  WiFi.setHostname("Incubator");
+  
+  // Explicitly use DHCP (begin without IP config)
   WiFi.begin(staSsid.c_str(), staPass.c_str());
   uint32_t start = millis();
   while (millis() - start < timeoutMs) {
@@ -1178,6 +1537,11 @@ void setup() {
   digitalWrite(RELAY_PIN, LOW);  // Start with lamp OFF until we get valid sensor reading
   relayOn = false;
   lastRelayOn = relayOn;
+  
+  pinMode(TEMP_ALARM_PIN, OUTPUT);
+  digitalWrite(TEMP_ALARM_PIN, LOW);
+  pinMode(HUMIDITY_ALARM_PIN, OUTPUT);
+  digitalWrite(HUMIDITY_ALARM_PIN, LOW);
 
   loadPrefs();  // Load preferences BEFORE sensor reads so targetMinF/targetMaxF are set correctly
 
@@ -1210,6 +1574,19 @@ void setup() {
       else if (lastTempF >= targetMaxF) relayOn = false;
       
       digitalWrite(RELAY_PIN, relayOn ? HIGH : LOW);
+      
+      // Update alarm pins (within 0.5°F for temp, within 5% for humidity)
+      bool tempAlarm = false;
+      bool humidityAlarm = false;
+      if (!isnan(lastTempF) && !isnan(targetMinF) && !isnan(targetMaxF)) {
+        tempAlarm = (lastTempF < (targetMinF - 0.5f) || lastTempF > (targetMaxF + 0.5f));
+      }
+      if (!isnan(lastRH) && !isnan(targetHMin) && !isnan(targetHMax)) {
+        humidityAlarm = (lastRH < (targetHMin - 5.0f) || lastRH > (targetHMax + 5.0f));
+      }
+      digitalWrite(TEMP_ALARM_PIN, tempAlarm ? HIGH : LOW);
+      digitalWrite(HUMIDITY_ALARM_PIN, humidityAlarm ? HIGH : LOW);
+      
       sensorRead = true;
       break; // Success, exit retry loop
     }
@@ -1222,6 +1599,9 @@ void setup() {
   if (!sensorRead) {
     relayOn = false;
     digitalWrite(RELAY_PIN, LOW);
+    // Set alarms HIGH when sensor fails (unknown state = alarm)
+    digitalWrite(TEMP_ALARM_PIN, HIGH);
+    digitalWrite(HUMIDITY_ALARM_PIN, HIGH);
     lastTempC = NAN;
     lastTempF = NAN;
     lastRH = NAN;
@@ -1233,6 +1613,7 @@ void setup() {
   }
 
   WiFi.setSleep(false);
+  WiFi.setHostname("Incubator");  // Set hostname for DHCP recognition
   applyWifiMode();
 
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
@@ -1287,11 +1668,27 @@ void loop() {
     else if (lastTempF >= targetMaxF) relayOn = false;
 
     digitalWrite(RELAY_PIN, relayOn ? HIGH : LOW);
+    
+    // Update alarm pins (within 0.5°F for temp, within 5% for humidity)
+    bool tempAlarm = false;
+    bool humidityAlarm = false;
+    if (!isnan(lastTempF) && !isnan(targetMinF) && !isnan(targetMaxF)) {
+      tempAlarm = (lastTempF < (targetMinF - 0.5f) || lastTempF > (targetMaxF + 0.5f));
+    }
+    if (!isnan(lastRH) && !isnan(targetHMin) && !isnan(targetHMax)) {
+      humidityAlarm = (lastRH < (targetHMin - 5.0f) || lastRH > (targetHMax + 5.0f));
+    }
+    digitalWrite(TEMP_ALARM_PIN, tempAlarm ? HIGH : LOW);
+    digitalWrite(HUMIDITY_ALARM_PIN, humidityAlarm ? HIGH : LOW);
+    
     wsBroadcastStatus();
   } else {
     // SENSOR DEAD → LAMP OFF (safety: don't heat if we can't read temp)
     relayOn = false;
     digitalWrite(RELAY_PIN, LOW);
+    // Set alarms HIGH when sensor is dead (unknown state = alarm)
+    digitalWrite(TEMP_ALARM_PIN, HIGH);
+    digitalWrite(HUMIDITY_ALARM_PIN, HIGH);
     
     // Always clear sensor values when read fails
     lastTempC = NAN;
