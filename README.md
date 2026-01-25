@@ -1,7 +1,7 @@
 # ESP32 Chicken Egg Incubator
 ### John Minton <cjohnweb@gmail.com>
 
-An ESP32-S3 based incubator controller with web interface, real-time sensor monitoring, and automatic temperature control. **Supports multiple bird species including Chicken, Quail, Duck, Turkey, Goose, and Peacock, plus a Custom mode for any other species or specific temperature requirements.**
+An ESP32-S3 based incubator controller with web interface, real-time sensor monitoring, and automatic temperature control. **Supports 37 preconfigured bird species with optimized temperature profiles, plus a Custom mode for any other species or specific temperature requirements.**
 
 ## Features
 
@@ -11,7 +11,7 @@ An ESP32-S3 based incubator controller with web interface, real-time sensor moni
 - **WebSocket Real-time Updates** - Live sensor data streaming
 - **WiFi Configuration** - Easy setup via web interface
 - **OTA Updates** - Over-the-air firmware updates
-- **Multiple Egg Profiles** - Pre-configured settings for different bird species (Chicken, Quail, Duck, Turkey, Goose, Peacock) plus Custom mode for any species
+- **Multiple Egg Profiles** - Pre-configured settings for 38 bird species (alphabetically organized from Chicken to Vulture) plus Custom mode for any species
 - **Temperature Peak Tracking** - Records highest temperature peaks for multiple time windows (6h, 3h, 1.5h, 1h, 30m, 15m)
 - **Alarm System** - GPIO-based alarms for temperature and humidity out-of-range conditions
 - **Dual WiFi Mode** - Access Point + Station mode for always-accessible setup
@@ -24,10 +24,12 @@ An ESP32-S3 based incubator controller with web interface, real-time sensor moni
 
 ## Setup
 
-1. **Update Passwords** (optional)
+1. **Update Passwords** (optional but recommended)
    - Open `incubator.ino`
    - Find the "Configuration - Passwords" section at the top
-   - Change `AP_PASS` and `OTA_PASS` if desired (both default to `1234`)
+   - **IMPORTANT**: `AP_PASS` must be at least 8 characters long for WPA2 security. If less than 8 characters, the device will broadcast as "ESP_XXXXXXX" instead of "Incubator"
+   - Change `AP_PASS` to at least 8 characters (default: `12345678`)
+   - Change `OTA_PASS` if desired (default: `1234`)
 
 2. **Hardware Connections**
    - DHT22 sensor on GPIO pin 4
@@ -51,7 +53,8 @@ An ESP32-S3 based incubator controller with web interface, real-time sensor moni
 
 1. **Connect to Access Point**
    - Device broadcasts its own wireless network: **"Incubator"**
-   - Connect with password: **1234** (or your custom password)
+   - **Note**: If you see "ESP_XXXXXXX" instead of "Incubator", the AP password is less than 8 characters. Update `AP_PASS` in the code to at least 8 characters and reflash.
+   - Connect with password: **12345678** (or your custom 8+ character password)
    - Access web interface at: **http://10.0.0.1**
 
 2. **Configure WiFi** (optional)
@@ -85,23 +88,56 @@ The device automatically controls the heating element (relay) based on:
 
 ### Egg Profiles
 
-The incubator supports multiple bird species with optimized temperature ranges:
+The incubator supports 37 bird species with optimized temperature ranges (listed alphabetically):
 
 - **Chicken** - 98.0°F to 100.5°F (default)
-- **Quail** - 99.5°F to 101.0°F
+- **Cockatiel** - 99.5°F to 100.0°F
+- **Cormorant** - 99.0°F to 99.5°F
+- **Crane** - 99.0°F to 99.5°F
 - **Duck** - 99.5°F to 100.0°F
+- **Duck Muscovy** - 99.0°F to 99.5°F
+- **Eagle** - 99.0°F to 99.5°F
+- **Emu** - 96.5°F to 97.5°F
+- **Falcon** - 99.0°F to 99.5°F
+- **Flamingo** - 99.0°F to 99.5°F
+- **Goose** - 99.0°F to 99.5°F
+- **Grouse** - 99.5°F to 100.0°F
+- **Guinea Fowl** - 99.5°F to 100.0°F
+- **Hawk** - 99.0°F to 99.5°F
+- **Heron** - 99.0°F to 99.5°F
+- **Hummingbird** - 99.5°F to 100.0°F
+- **Large Parrots** (Macaw, Cockatoo) - 99.0°F to 99.5°F
+- **Lovebird** - 99.5°F to 100.0°F
+- **Ostrich** - 96.0°F to 97.0°F
+- **Owl** - 99.0°F to 99.5°F
+- **Parakeet** - 99.5°F to 100.0°F
+- **Parrots** (Amazon, African Grey) - 99.5°F to 100.0°F
+- **Partridge** - 99.5°F to 100.0°F
+- **Peacock** - 99.5°F to 100.0°F
+- **Pelican** - 99.0°F to 99.5°F
+- **Penguin** - 98.5°F to 99.5°F
+- **Pheasant** - 99.5°F to 100.0°F
+- **Pigeon** - 99.5°F to 100.0°F
+- **Quail** - 99.5°F to 100.5°F
+- **Rail** - 99.0°F to 99.5°F
+- **Rhea** - 97.0°F to 98.0°F
+- **Seabirds** (Gull, Tern, Puffin) - 99.0°F to 99.5°F
+- **Songbirds** (Finch, Canary, Sparrow) - 99.5°F to 100.0°F
+- **Stork** - 99.0°F to 99.5°F
+- **Swan** - 99.0°F to 99.5°F
+- **Toucan** - 99.0°F to 99.5°F
 - **Turkey** - 99.0°F to 100.0°F
-- **Goose** - 99.0°F to 100.0°F
-- **Peacock** - 99.0°F to 100.0°F
+- **Vulture** - 99.0°F to 99.5°F
 - **Custom** - User-defined temperature range for any other species or specific requirements
 
-Simply select your desired profile from the web interface, or use Custom mode to set your own temperature range. The device will automatically maintain the selected temperature range throughout the incubation period.
+Simply select your desired profile from the web interface dropdown, or use Custom mode to set your own temperature range. The device will automatically maintain the selected temperature range throughout the incubation period.
 
 ### OTA Updates
 
 1. Connect device to your network
 2. In Arduino IDE: Tools → Port → Select "Incubator at [IP address]"
 3. Upload new firmware over-the-air
+4. **Note**: During OTA updates, the Access Point is automatically disabled to ensure stable connection. The device will restart after a successful update.
 
 ## API Endpoints
 

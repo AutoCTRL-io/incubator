@@ -28,22 +28,28 @@
 
 // ===== Configuration - Passwords =====
 // Change these passwords before deploying
-static const char* AP_PASS = "1234";      // Access Point password
-static const char* OTA_PASS = "1234";     // OTA update password
+/* 
+If AP_PASS is less than 8 characters, instead of broadcasting 
+Incubator network it will broadcast ESP_XXXXXXX network.
+Ensure password is at least 8 characters long.
+*/
+static const char *AP_PASS = "12345678"; // Access Point password, 8 character minimum.
+static const char *OTA_PASS = "1234";    // OTA update password
+
+// ===== AP Defaults =====
+static const char *AP_SSID = "Incubator";
+
 
 // ===== Pins =====
 #define DHTPIN 4
 #define DHTTYPE DHT22
-#define RELAY_PIN 5  // HIGH = heat ON
-#define TEMP_ALARM_PIN 6  // HIGH when temp alarm active
-#define HUMIDITY_ALARM_PIN 7  // HIGH when humidity alarm active
+#define RELAY_PIN 5          // HIGH = heat ON
+#define TEMP_ALARM_PIN 6     // HIGH when temp alarm active
+#define HUMIDITY_ALARM_PIN 7 // HIGH when humidity alarm active
 
 // ===== Timing =====
-static const uint32_t SENSOR_INTERVAL_MS = 2000;  // 1s
+static const uint32_t SENSOR_INTERVAL_MS = 2000; // 1s
 static const uint16_t WS_PORT = 81;
-
-// ===== AP Defaults =====
-static const char* AP_SSID = "Incubator";
 
 // ===== Acceptable limits (as requested) =====
 static const float TEMP_MIN_ALLOWED_F = -60.0f;
@@ -52,13 +58,16 @@ static const float TEMP_MAX_ALLOWED_F = 200.0f;
 // ===== Ideal defaults for hatching chicken eggs =====
 static const float DEFAULT_TMIN_F = 98.0f;
 static const float DEFAULT_TMAX_F = 100.5f;
-static const float DEFAULT_HMIN = 40.0f;  // Target humidity minimum (%)
-static const float DEFAULT_HMAX = 60.0f;  // Target humidity maximum (%)
+static const float DEFAULT_HMIN = 40.0f; // Target humidity minimum (%)
+static const float DEFAULT_HMAX = 60.0f; // Target humidity maximum (%)
 
 static const uint8_t MAX_TEMP_PEAKS = 5;
 static const uint32_t TEMP_PEAK_WINDOW_SEC = 6 * 60 * 60;
 
-struct TempPeak {
+volatile bool otaInProgress = false;
+
+struct TempPeak
+{
   float tempF;
   time_t ts;
 };
@@ -92,108 +101,201 @@ float lastDewF = NAN;
 float lastHeatC = NAN;
 float lastHeatF = NAN;
 
-
 uint32_t lastSensorMs = 0;
 
-enum EggProfile : uint8_t {
+enum EggProfile : uint8_t
+{
   PROFILE_CHICKEN = 0,
-  PROFILE_QUAIL,
+  PROFILE_COCKATIEL,
+  PROFILE_CORMORANT,
+  PROFILE_CRANE,
   PROFILE_DUCK,
-  PROFILE_TURKEY,
+  PROFILE_DUCK_MUSCOVY,
+  PROFILE_EAGLE,
+  PROFILE_EMU,
+  PROFILE_FALCON,
+  PROFILE_FLAMINGO,
   PROFILE_GOOSE,
+  PROFILE_GROUSE,
+  PROFILE_GUINEA_FOWL,
+  PROFILE_HAWK,
+  PROFILE_HERON,
+  PROFILE_HUMMINGBIRD,
+  PROFILE_LARGE_PARROTS,
+  PROFILE_LOVEBIRD,
+  PROFILE_OSTRICH,
+  PROFILE_OWL,
+  PROFILE_PARAKEET,
+  PROFILE_PARROTS,
+  PROFILE_PARTRIDGE,
   PROFILE_PEACOCK,
+  PROFILE_PELICAN,
+  PROFILE_PENGUIN,
+  PROFILE_PHEASANT,
+  PROFILE_PIGEON,
+  PROFILE_QUAIL,
+  PROFILE_RAIL,
+  PROFILE_RHEA,
+  PROFILE_SEABIRDS,
+  PROFILE_SONGBIRDS,
+  PROFILE_STORK,
+  PROFILE_SWAN,
+  PROFILE_TOUCAN,
+  PROFILE_TURKEY,
+  PROFILE_VULTURE,
   PROFILE_CUSTOM
 };
 
-struct ProfilePreset {
-  const char* name;
+struct ProfilePreset
+{
+  const char *name;
   float tmin;
   float tmax;
 };
 
 static const ProfilePreset PROFILE_PRESETS[] = {
-  { "Chicken", 98.0f, 100.5f },
-  { "Quail", 99.5f, 101.0f },
-  { "Duck", 99.5f, 100.0f },
-  { "Turkey", 99.0f, 100.0f },
-  { "Goose", 99.0f, 100.0f },
-  { "Peacock", 99.0f, 100.0f },
-  { "Custom", 98.0f, 100.5f }  // placeholder
+    {"Chicken", 98.0f, 100.5f},
+    {"Cockatiel", 99.5f, 100.0f},
+    {"Cormorant", 99.0f, 99.5f},
+    {"Crane", 99.0f, 99.5f},
+    {"Duck", 99.5f, 100.0f},
+    {"Duck Muscovy", 99.0f, 99.5f},
+    {"Eagle", 99.0f, 99.5f},
+    {"Emu", 96.5f, 97.5f},
+    {"Falcon", 99.0f, 99.5f},
+    {"Flamingo", 99.0f, 99.5f},
+    {"Goose", 99.0f, 99.5f},
+    {"Grouse", 99.5f, 100.0f},
+    {"Guinea Fowl", 99.5f, 100.0f},
+    {"Hawk", 99.0f, 99.5f},
+    {"Heron", 99.0f, 99.5f},
+    {"Hummingbird", 99.5f, 100.0f},
+    {"Large Parrots", 99.0f, 99.5f},
+    {"Lovebird", 99.5f, 100.0f},
+    {"Ostrich", 96.0f, 97.0f},
+    {"Owl", 99.0f, 99.5f},
+    {"Parakeet", 99.5f, 100.0f},
+    {"Parrots", 99.5f, 100.0f},
+    {"Partridge", 99.5f, 100.0f},
+    {"Peacock", 99.5f, 100.0f},
+    {"Pelican", 99.0f, 99.5f},
+    {"Penguin", 98.5f, 99.5f},
+    {"Pheasant", 99.5f, 100.0f},
+    {"Pigeon", 99.5f, 100.0f},
+    {"Quail", 99.5f, 100.5f},
+    {"Rail", 99.0f, 99.5f},
+    {"Rhea", 97.0f, 98.0f},
+    {"Seabirds", 99.0f, 99.5f},
+    {"Songbirds", 99.5f, 100.0f},
+    {"Stork", 99.0f, 99.5f},
+    {"Swan", 99.0f, 99.5f},
+    {"Toucan", 99.0f, 99.5f},
+    {"Turkey", 99.0f, 100.0f},
+    {"Vulture", 99.0f, 99.5f},
+    {"Custom", 98.0f, 100.5f} // placeholder
 };
 
 EggProfile currentProfile = PROFILE_CHICKEN;
 
-static inline float cToF(float c) {
+static inline float cToF(float c)
+{
   return (c * 9.0f / 5.0f) + 32.0f;
 }
 
 // Absolute humidity (g/m^3) from tempC and RH%
 // AH = 216.7 * ( (RH/100) * 6.112 * exp(17.67*T/(T+243.5)) ) / (T+273.15)
-float absoluteHumidity_gm3(float tempC, float rh) {
+float absoluteHumidity_gm3(float tempC, float rh)
+{
   float T = tempC;
   float RH = rh;
-  float es = 6.112f * expf((17.67f * T) / (T + 243.5f));  // hPa
-  float e = (RH / 100.0f) * es;                           // hPa
-  float ah = 216.7f * (e / (T + 273.15f));                // g/m^3
+  float es = 6.112f * expf((17.67f * T) / (T + 243.5f)); // hPa
+  float e = (RH / 100.0f) * es;                          // hPa
+  float ah = 216.7f * (e / (T + 273.15f));               // g/m^3
   return ah;
 }
 
-String jsonEscape(const String& s) {
+String jsonEscape(const String &s)
+{
   String out;
   out.reserve(s.length() + 8);
-  for (size_t i = 0; i < s.length(); i++) {
+  for (size_t i = 0; i < s.length(); i++)
+  {
     char c = s[i];
-    switch (c) {
-      case '\\': out += "\\\\"; break;
-      case '\"': out += "\\\""; break;
-      case '\n': out += "\\n"; break;
-      case '\r': out += "\\r"; break;
-      case '\t': out += "\\t"; break;
-      default: out += c; break;
+    switch (c)
+    {
+    case '\\':
+      out += "\\\\";
+      break;
+    case '\"':
+      out += "\\\"";
+      break;
+    case '\n':
+      out += "\\n";
+      break;
+    case '\r':
+      out += "\\r";
+      break;
+    case '\t':
+      out += "\\t";
+      break;
+    default:
+      out += c;
+      break;
     }
   }
   return out;
 }
 
-String wifiStatusString() {
-  if (WiFi.status() == WL_CONNECTED) {
+String wifiStatusString()
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
     return WiFi.SSID();
   }
   return "";
 }
 
-void recordTempPeak(float tempF) {
+void recordTempPeak(float tempF)
+{
   time_t now;
   time(&now);
-  if (now < 100000) return;
+  if (now < 100000)
+    return;
 
   uint8_t w = 0;
-  for (uint8_t i = 0; i < tempPeakCount; i++) {
-    if ((now - tempPeaks[i].ts) <= TEMP_PEAK_WINDOW_SEC) {
+  for (uint8_t i = 0; i < tempPeakCount; i++)
+  {
+    if ((now - tempPeaks[i].ts) <= TEMP_PEAK_WINDOW_SEC)
+    {
       tempPeaks[w++] = tempPeaks[i];
     }
   }
   tempPeakCount = w;
 
-  if (tempPeakCount < MAX_TEMP_PEAKS) {
-    tempPeaks[tempPeakCount++] = { tempF, now };
+  if (tempPeakCount < MAX_TEMP_PEAKS)
+  {
+    tempPeaks[tempPeakCount++] = {tempF, now};
     return;
   }
 
   uint8_t minIdx = 0;
-  for (uint8_t i = 1; i < tempPeakCount; i++) {
+  for (uint8_t i = 1; i < tempPeakCount; i++)
+  {
     if (tempPeaks[i].tempF < tempPeaks[minIdx].tempF)
       minIdx = i;
   }
 
-  if (tempF > tempPeaks[minIdx].tempF) {
-    tempPeaks[minIdx] = { tempF, now };
+  if (tempF > tempPeaks[minIdx].tempF)
+  {
+    tempPeaks[minIdx] = {tempF, now};
   }
 }
 
 // Dew point (C) using Magnus formula
-static inline float dewPointC(float tempC, float rh) {
-  if (isnan(tempC) || isnan(rh) || rh <= 0.0f) return NAN;
+static inline float dewPointC(float tempC, float rh)
+{
+  if (isnan(tempC) || isnan(rh) || rh <= 0.0f)
+    return NAN;
 
   // Magnus constants for water over liquid range
   const float a = 17.62f;
@@ -204,18 +306,24 @@ static inline float dewPointC(float tempC, float rh) {
   return dp;
 }
 
-String buildStatusJson() {
+String buildStatusJson()
+{
   String mode;
   bool apUp = (WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_AP_STA);
   bool staUp = (WiFi.getMode() == WIFI_STA || WiFi.getMode() == WIFI_AP_STA);
 
-  if (apUp && staUp) mode = "AP + WiFi";
-  else if (apUp) mode = "AP";
-  else if (staUp) mode = "WiFi";
-  else mode = "OFF";
+  if (apUp && staUp)
+    mode = "AP + WiFi";
+  else if (apUp)
+    mode = "AP";
+  else if (staUp)
+    mode = "WiFi";
+  else
+    mode = "OFF";
 
   String ipSta = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "";
   String ipAp = apUp ? WiFi.softAPIP().toString() : "";
+  String apSsid = apUp ? WiFi.softAPSSID() : "";
 
   uint8_t mac[6];
   esp_wifi_get_mac(WIFI_IF_STA, mac);
@@ -227,11 +335,15 @@ String buildStatusJson() {
   time_t now;
   time(&now);
 
-  auto peakForWindow = [&](uint32_t sec) -> float {
+  auto peakForWindow = [&](uint32_t sec) -> float
+  {
     float m = NAN;
-    for (uint8_t i = 0; i < tempPeakCount; i++) {
-      if ((now - tempPeaks[i].ts) <= sec) {
-        if (isnan(m) || tempPeaks[i].tempF > m) m = tempPeaks[i].tempF;
+    for (uint8_t i = 0; i < tempPeakCount; i++)
+    {
+      if ((now - tempPeaks[i].ts) <= sec)
+      {
+        if (isnan(m) || tempPeaks[i].tempF > m)
+          m = tempPeaks[i].tempF;
       }
     }
     return m;
@@ -245,6 +357,7 @@ String buildStatusJson() {
   j += ",\"mode\":\"" + mode + "\"";
   j += ",\"ip_sta\":\"" + ipSta + "\"";
   j += ",\"ip_ap\":\"" + ipAp + "\"";
+  j += ",\"ap_ssid\":\"" + jsonEscape(apSsid) + "\"";
   j += ",\"mac\":\"" + String(macStr) + "\"";
 
   j += ",\"profile_id\":" + String((uint8_t)currentProfile);
@@ -258,17 +371,21 @@ String buildStatusJson() {
   // Calculate alarm status (within 0.5°F for temp, within 5% for humidity)
   bool tempAlarm = false;
   bool humidityAlarm = false;
-  if (!isnan(lastTempF) && !isnan(targetMinF) && !isnan(targetMaxF)) {
-    if (lastTempF < (targetMinF - 0.5f) || lastTempF > (targetMaxF + 0.5f)) {
+  if (!isnan(lastTempF) && !isnan(targetMinF) && !isnan(targetMaxF))
+  {
+    if (lastTempF < (targetMinF - 0.5f) || lastTempF > (targetMaxF + 0.5f))
+    {
       tempAlarm = true;
     }
   }
-  if (!isnan(lastRH) && !isnan(targetHMin) && !isnan(targetHMax)) {
-    if (lastRH < (targetHMin - 5.0f) || lastRH > (targetHMax + 5.0f)) {
+  if (!isnan(lastRH) && !isnan(targetHMin) && !isnan(targetHMax))
+  {
+    if (lastRH < (targetHMin - 5.0f) || lastRH > (targetHMax + 5.0f))
+    {
       humidityAlarm = true;
     }
   }
-  
+
   j += ",\"temp_alarm\":" + String(tempAlarm ? "true" : "false");
   j += ",\"humidity_alarm\":" + String(humidityAlarm ? "true" : "false");
 
@@ -289,23 +406,29 @@ String buildStatusJson() {
 
   // Add temp_peaks for different time windows (highest peak in each window)
   j += ",\"temp_peaks\":[";
-  uint32_t windows[] = {6*3600, 3*3600, 90*60, 3600, 30*60, 15*60}; // 6h, 3h, 1.5h, 1h, 30m, 15m
-  const char* labels[] = {"6h", "3h", "1.5h", "1h", "30m", "15m"};
+  uint32_t windows[] = {6 * 3600, 3 * 3600, 90 * 60, 3600, 30 * 60, 15 * 60}; // 6h, 3h, 1.5h, 1h, 30m, 15m
+  const char *labels[] = {"6h", "3h", "1.5h", "1h", "30m", "15m"};
   bool first = true;
-  for (uint8_t w = 0; w < 6; w++) {
+  for (uint8_t w = 0; w < 6; w++)
+  {
     float maxTemp = NAN;
     time_t maxTs = 0;
-    for (uint8_t i = 0; i < tempPeakCount; i++) {
-      if ((now - tempPeaks[i].ts) <= windows[w]) {
-        if (isnan(maxTemp) || tempPeaks[i].tempF > maxTemp) {
+    for (uint8_t i = 0; i < tempPeakCount; i++)
+    {
+      if ((now - tempPeaks[i].ts) <= windows[w])
+      {
+        if (isnan(maxTemp) || tempPeaks[i].tempF > maxTemp)
+        {
           maxTemp = tempPeaks[i].tempF;
           maxTs = tempPeaks[i].ts;
         }
       }
     }
-    if (!first) j += ",";
+    if (!first)
+      j += ",";
     j += "{\"label\":\"" + String(labels[w]) + "\"";
-    if (!isnan(maxTemp)) {
+    if (!isnan(maxTemp))
+    {
       j += ",\"temp_f\":" + String(maxTemp, 2);
       j += ",\"ts\":" + String(maxTs);
     }
@@ -318,15 +441,17 @@ String buildStatusJson() {
   return j;
 }
 
-
 // GET /api/wifi/scan  -> {"networks":[{"ssid":"x","rssi":-55,"enc":true}, ...]}
-void handleApiWifiScanGet() {
+void handleApiWifiScanGet()
+{
   int n = WiFi.scanNetworks(/*async=*/false, /*hidden=*/true);
 
   String j = "{";
   j += "\"networks\":[";
-  for (int i = 0; i < n; i++) {
-    if (i) j += ",";
+  for (int i = 0; i < n; i++)
+  {
+    if (i)
+      j += ",";
     String ssid = WiFi.SSID(i);
     int32_t rssi = WiFi.RSSI(i);
     bool enc = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
@@ -343,14 +468,17 @@ void handleApiWifiScanGet() {
   server.send(200, "application/json", j);
 }
 
-void handleApiResetPost() {
+void handleApiResetPost()
+{
   server.send(200, "application/json", "{\"ok\":true}");
   delay(200);
   ESP.restart();
 }
 
-void handleApiProfilePost() {
-  if (!server.hasArg("plain")) {
+void handleApiProfilePost()
+{
+  if (!server.hasArg("plain"))
+  {
     server.send(400, "application/json", "{\"ok\":false}");
     return;
   }
@@ -359,19 +487,23 @@ void handleApiProfilePost() {
   int profileId;
   float tmin, tmax;
 
-  if (!getJsonInt(body, "profile_id", profileId)) {
+  if (!getJsonInt(body, "profile_id", profileId))
+  {
     server.send(400, "application/json", "{\"ok\":false}");
     return;
   }
 
-  if (profileId < 0 || profileId > (uint8_t)PROFILE_CUSTOM) {
+  if (profileId < 0 || profileId > (uint8_t)PROFILE_CUSTOM)
+  {
     server.send(400, "application/json", "{\"ok\":false}");
     return;
   }
 
   // Custom requires temps
-  if ((EggProfile)profileId == PROFILE_CUSTOM) {
-    if (!getJsonFloat(body, "tmin", tmin) || !getJsonFloat(body, "tmax", tmax)) {
+  if ((EggProfile)profileId == PROFILE_CUSTOM)
+  {
+    if (!getJsonFloat(body, "tmin", tmin) || !getJsonFloat(body, "tmax", tmax))
+    {
       server.send(400, "application/json", "{\"ok\":false}");
       return;
     }
@@ -382,7 +514,8 @@ void handleApiProfilePost() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
-void wsBroadcastStatus() {
+void wsBroadcastStatus()
+{
   String msg = buildStatusJson();
   ws.broadcastTXT(msg);
 }
@@ -538,17 +671,30 @@ a{color:var(--accent);text-decoration:none;font-size:13px}
 }
 .timer-value{
   position:absolute;
-  top:50%;
-  left:50%;
-  transform:translate(-50%,-50%);
+  top:27%;
+  left:24%;
   font-size:14px;
   font-weight:800;
   font-variant-numeric:tabular-nums;
   color:var(--text);
   z-index:1;
+  text-align:center;
+  line-height:14px;
+  white-space:nowrap;
+  margin:0;
+  padding:0;
+  display:inline-block;
+  vertical-align:middle;
 }
 .lamp-row{
   display:flex;
+  align-items:center;
+  margin-bottom:16px;
+  margin-top:16px;
+}
+.timer-row{
+  display:flex;
+  justify-content:flex-start;
   align-items:center;
   margin-bottom:10px;
 }
@@ -654,6 +800,8 @@ function applyStatus(s){
   if(modeEl) modeEl.textContent = s.mode || '—';
   const ipApEl = el('ip_ap');
   if(ipApEl) ipApEl.textContent = s.ip_ap || '—';
+  const apSsidEl = el('ap_ssid');
+  if(apSsidEl) apSsidEl.textContent = s.ap_ssid || '—';
   const ipStaEl = el('ip_sta');
   if(ipStaEl) ipStaEl.textContent = s.ip_sta || '—';
   const macEl = el('mac');
@@ -731,11 +879,17 @@ function applyStatus(s){
   const lampIconEl = el('lampIcon');
   if(lampIconEl) lampIconEl.classList.toggle('on', lampOn);
 
-  const isCustom = (s.profile_id === 6);
+  const isCustom = (s.profile_id === 38);
 
   const profileSelectEl = el('profileSelect');
-  if(profileSelectEl && profileSelectEl.value != String(s.profile_id)) {
+  // Only update profile dropdown if user hasn't manually selected Custom
+  // This prevents WebSocket updates from overwriting user's Custom selection
+  if(profileSelectEl && profileSelectEl.dataset.userSelected !== 'true' && profileSelectEl.value != String(s.profile_id)) {
     profileSelectEl.value = String(s.profile_id);
+  }
+  // Reset the flag if the backend profile matches what user selected
+  if(profileSelectEl && profileSelectEl.dataset.userSelected === 'true' && String(s.profile_id) === profileSelectEl.value){
+    delete profileSelectEl.dataset.userSelected;
   }
 
   const rangeMinEl = el('range_min');
@@ -748,7 +902,6 @@ function applyStatus(s){
   const rangeDisplayEl = el('rangeDisplay');
   if(rangeDisplayEl){
     rangeDisplayEl.style.display = isCustom ? 'none' : 'flex';
-    rangeDisplayEl.style.justifyContent = 'flex-end';
   }
 
   uiState.tmin = s.tmin;
@@ -906,7 +1059,7 @@ function saveProfile(){
   if(!profileSelectEl) return;
   
   const profileId = parseInt(profileSelectEl.value);
-  const isCustom = (profileId === 6);
+  const isCustom = (profileId === 38);
   
   // Update UI immediately when Custom is selected
   const customRangeEl = el('customRange');
@@ -914,18 +1067,31 @@ function saveProfile(){
   if(customRangeEl) customRangeEl.style.display = isCustom ? 'block' : 'none';
   if(rangeDisplayEl) rangeDisplayEl.style.display = isCustom ? 'none' : 'flex';
   
+  // Immediately save to backend to prevent WebSocket from overwriting
   let body = { profile_id: profileId };
   
   if(isCustom && tminEl && tmaxEl){
-    body.tmin = parseFloat(tminEl.value);
-    body.tmax = parseFloat(tmaxEl.value);
+    const tmin = parseFloat(tminEl.value);
+    const tmax = parseFloat(tmaxEl.value);
+    if(!isNaN(tmin) && !isNaN(tmax)){
+      body.tmin = tmin;
+      body.tmax = tmax;
+    }else{
+      // If Custom selected but no values yet, use current values from status
+      body.tmin = uiState.tmin || 98.0;
+      body.tmax = uiState.tmax || 100.5;
+    }
   }
   
   fetch('/api/profile',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify(body)
-  }).then(showToast);
+  }).then(() => {
+    showToast();
+    // Mark that we've saved, so WebSocket updates don't overwrite
+    profileSelectEl.dataset.userSelected = 'true';
+  });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -981,52 +1147,88 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
 
   <!-- System -->
   <div class="row"><span class="label">WiFi</span><span id="wifi" class="value">—</span></div>
+  <div class="row"><span class="label">AP SSID</span><span id="ap_ssid" class="value">—</span></div>
   <div class="row"><span class="label">WebSocket</span><span id="ws" class="value">—</span></div>
   <div class="row"><span class="label">Mode</span><span id="mode" class="value">—</span></div>
   <div class="row"><span class="label">Wifi IP</span><span id="ip_sta" class="value">—</span></div>
   <div class="row"><span class="label">AP IP</span><span id="ip_ap" class="value">—</span></div>
   <div class="row"><span class="label">MAC</span><span id="mac" class="value">—</span></div>
 
+  <div class="row">
+    <span class="label">Profile</span>
+    <select id="profileSelect" style="background:#0d1117;border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:13px;font-weight:600">
+      <option value="0">Chicken</option>
+      <option value="1">Cockatiel</option>
+      <option value="2">Cormorant</option>
+      <option value="3">Crane</option>
+      <option value="4">Duck</option>
+      <option value="5">Duck Muscovy</option>
+      <option value="6">Eagle</option>
+      <option value="7">Emu</option>
+      <option value="8">Falcon</option>
+      <option value="9">Flamingo</option>
+      <option value="10">Goose</option>
+      <option value="11">Grouse</option>
+      <option value="12">Guinea Fowl</option>
+      <option value="13">Hawk</option>
+      <option value="14">Heron</option>
+      <option value="15">Hummingbird</option>
+      <option value="16">Large Parrots</option>
+      <option value="17">Lovebird</option>
+      <option value="18">Ostrich</option>
+      <option value="19">Owl</option>
+      <option value="20">Parakeet</option>
+      <option value="21">Parrots</option>
+      <option value="22">Partridge</option>
+      <option value="23">Peacock</option>
+      <option value="24">Pelican</option>
+      <option value="25">Penguin</option>
+      <option value="26">Pheasant</option>
+      <option value="27">Pigeon</option>
+      <option value="28">Quail</option>
+      <option value="29">Rail</option>
+      <option value="30">Rhea</option>
+      <option value="31">Seabirds</option>
+      <option value="32">Songbirds</option>
+      <option value="33">Stork</option>
+      <option value="34">Swan</option>
+      <option value="35">Toucan</option>
+      <option value="36">Turkey</option>
+      <option value="37">Vulture</option>
+      <option value="38">Custom</option>
+    </select>
+  </div>
 
-  <!-- Temperature Range -->
-  <div class="mini">
-    <div class="miniTitle"><span class="t">Temperature Range</span></div>
+  <div id="rangeDisplay" class="row">
+    <span class="label">Target Range</span>
+    <span class="value">
+      <span id="range_min">—</span> – <span id="range_max">—</span> °F
+    </span>
+  </div>
 
-    <div style="margin-bottom:8px">
-      <label style="display:block;font-size:13px;color:var(--muted);margin-bottom:4px">Profile</label>
-      <select id="profileSelect" style="width:100%">
-        <option value="0">Chicken</option>
-        <option value="1">Quail</option>
-        <option value="2">Duck</option>
-        <option value="3">Turkey</option>
-        <option value="4">Goose</option>
-        <option value="5">Peacock</option>
-        <option value="6">Custom</option>
-      </select>
+  <div id="customRange" style="display:none">
+    <div class="row" style="padding:4px 0">
+      <span class="label">Min °F</span>
+      <input id="tmin" placeholder="Min °F" style="background:#0d1117;border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:13px;width:120px"/>
     </div>
-
-    <div id="rangeDisplay" class="row">
-      <span class="value">
-        <span id="range_min">—</span> – <span id="range_max">—</span> °F
-      </span>
-    </div>
-
-    <div id="customRange" style="display:none;margin-top:8px">
-      <input id="tmin" placeholder="Min °F"/>
-      <input id="tmax" placeholder="Max °F" style="margin-top:6px"/>
+    <div class="row" style="padding:4px 0">
+      <span class="label">Max °F</span>
+      <input id="tmax" placeholder="Max °F" style="background:#0d1117;border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:13px;width:120px"/>
     </div>
   </div>
 
   <!-- Metrics -->
   <div class="lamp-row">
+    <div class="metric wide" style="flex:1">
+      <div id="lampIcon" class="lampIcon"></div>
+      <div class="lampText">Lamp <span id="lamp">—</span></div>
+    </div>
+  </div>
+  <div class="timer-row">
     <div id="timerContainer" class="timer-container">
       <div id="timerRing" class="timer-ring">
         <div id="timerValue" class="timer-value">2.0</div>
       </div>
-    </div>
-    <div class="metric wide" style="flex:1">
-      <div id="lampIcon" class="lampIcon"></div>
-      <div class="lampText">Lamp <span id="lamp">—</span></div>
     </div>
   </div>
   <div class="grid">
@@ -1193,8 +1395,8 @@ load();
 </html>
 )HTML";
 
-
-void loadPrefs() {
+void loadPrefs()
+{
   prefs.begin("incubator", false);
 
   // 1. Defaults (always start Chicken)
@@ -1203,29 +1405,34 @@ void loadPrefs() {
   targetMaxF = PROFILE_PRESETS[PROFILE_CHICKEN].tmax;
 
   // 2. Load stored profile if exists
-  if (prefs.isKey("profile")) {
+  if (prefs.isKey("profile"))
+  {
     uint8_t p = prefs.getUChar("profile", PROFILE_CHICKEN);
-    if (p <= PROFILE_CUSTOM) {
+    if (p <= PROFILE_CUSTOM)
+    {
       currentProfile = (EggProfile)p;
     }
   }
 
   // 3. Load temps if stored
   bool hasTemps = prefs.isKey("tmin") && prefs.isKey("tmax");
-  if (hasTemps) {
+  if (hasTemps)
+  {
     targetMinF = prefs.getFloat("tmin");
     targetMaxF = prefs.getFloat("tmax");
   }
 
   // 4. Apply preset overwrite unless CUSTOM
-  if (currentProfile != PROFILE_CUSTOM) {
+  if (currentProfile != PROFILE_CUSTOM)
+  {
     targetMinF = PROFILE_PRESETS[currentProfile].tmin;
     targetMaxF = PROFILE_PRESETS[currentProfile].tmax;
   }
 
   // 5. Load humidity targets if stored
   bool hasHumidity = prefs.isKey("hmin") && prefs.isKey("hmax");
-  if (hasHumidity) {
+  if (hasHumidity)
+  {
     targetHMin = prefs.getFloat("hmin");
     targetHMax = prefs.getFloat("hmax");
   }
@@ -1234,203 +1441,305 @@ void loadPrefs() {
   staSsid = prefs.getString("ssid", "");
   staPass = prefs.getString("pass", "");
   keepApWhenConnected = prefs.getBool("keepap", true);
+
+  prefs.end();
+
+  Serial.print("Loaded WiFi SSID: ");
+  Serial.println(staSsid.length() > 0 ? staSsid : "(none)");
 }
 
-void applyProfile(EggProfile p, float tmin, float tmax) {
+void applyProfile(EggProfile p, float tmin, float tmax)
+{
   currentProfile = p;
 
-  if (p == PROFILE_CUSTOM) {
+  if (p == PROFILE_CUSTOM)
+  {
     targetMinF = tmin;
     targetMaxF = tmax;
-  } else {
+  }
+  else
+  {
     targetMinF = PROFILE_PRESETS[p].tmin;
     targetMaxF = PROFILE_PRESETS[p].tmax;
   }
 
+  prefs.begin("incubator", false);
   prefs.putUChar("profile", (uint8_t)p);
   prefs.putFloat("tmin", targetMinF);
   prefs.putFloat("tmax", targetMaxF);
-  // Note: Humidity targets are saved separately via saveTargets if needed
+  prefs.end();
 }
 
-void saveTargets(float tmin, float tmax) {
+void saveTargets(float tmin, float tmax)
+{
   targetMinF = tmin;
   targetMaxF = tmax;
+
+  prefs.begin("incubator", false);
   prefs.putFloat("tmin", targetMinF);
   prefs.putFloat("tmax", targetMaxF);
+  prefs.end();
 }
 
-void saveHumidityTargets(float hmin, float hmax) {
+void saveHumidityTargets(float hmin, float hmax)
+{
   targetHMin = hmin;
   targetHMax = hmax;
+
+  prefs.begin("incubator", false);
   prefs.putFloat("hmin", targetHMin);
   prefs.putFloat("hmax", targetHMax);
+  prefs.end();
 }
 
-void saveWifi(const String& ssid, const String& pass, bool keepAp) {
+void saveWifi(const String &ssid, const String &pass, bool keepAp)
+{
   staSsid = ssid;
   staPass = pass;
   keepApWhenConnected = keepAp;
 
+  prefs.begin("incubator", false);
   prefs.putString("ssid", staSsid);
   prefs.putString("pass", staPass);
   prefs.putBool("keepap", keepApWhenConnected);
+  prefs.end();
 }
 
-void startAP() {
-  // Ensure AP interface hostname + IP are what you want before bringing AP up
+void startAP(int channel)
+{
   WiFi.softAPdisconnect(true);
 
-  // AP IP must be 10.0.0.1
-  IPAddress apIP(10, 0, 0, 1);
-  IPAddress gw(10, 0, 0, 1);
-  IPAddress mask(255, 255, 255, 0);
+  IPAddress apIP(10, 0, 0, 1), gw(10, 0, 0, 1), mask(255, 255, 255, 0);
   WiFi.softAPConfig(apIP, gw, mask);
 
-  // DHCP lease "device name" on the AP side (clients connected to Incubator AP)
-  WiFi.softAPsetHostname("Incubator");
+  if (channel < 1 || channel > 13)
+    channel = 1;
 
-  // Bring up AP
-  WiFi.softAP(AP_SSID, AP_PASS);
+  bool ok = WiFi.softAP(AP_SSID, AP_PASS, channel, /*hidden=*/0, /*maxconn=*/4);
+  Serial.printf("softAP ok=%d ssid=%s ip=%s ch=%d\n",
+                ok, WiFi.softAPSSID().c_str(),
+                WiFi.softAPIP().toString().c_str(),
+                WiFi.channel());
+
+  // Optional: if it fails, fall back to OPEN AP instead of some weird state
+  if (!ok)
+  {
+    Serial.println("softAP failed (password must be 8+ chars). Falling back to OPEN AP.");
+    WiFi.softAP(AP_SSID); // open AP
+  }
 }
 
-bool connectSTA(uint32_t timeoutMs = 15000) {
-  if (staSsid.length() == 0) return false;
+bool connectSTA(uint32_t timeoutMs = 15000)
+{
+  if (staSsid.length() == 0)
+  {
+    Serial.println("No WiFi credentials stored");
+    return false;
+  }
 
   // Ensure DHCP is used (no static IP config)
   // Set hostname before connecting so DHCP server recognizes it
   WiFi.setHostname("Incubator");
-  
+
+  Serial.print("Connecting to WiFi: ");
+  Serial.println(staSsid);
+
   // Explicitly use DHCP (begin without IP config)
   WiFi.begin(staSsid.c_str(), staPass.c_str());
   uint32_t start = millis();
-  while (millis() - start < timeoutMs) {
-    if (WiFi.status() == WL_CONNECTED) return true;
+  while (millis() - start < timeoutMs)
+  {
+    if (WiFi.status() == WL_CONNECTED)
+    {
+      Serial.print("WiFi connected! IP: ");
+      Serial.println(WiFi.localIP());
+      return true;
+    }
     delay(100);
   }
+  Serial.println("WiFi connection timeout");
   return (WiFi.status() == WL_CONNECTED);
 }
 
-void applyWifiMode() {
-  bool haveCreds = (staSsid.length() > 0);
+void applyWifiMode()
+{
+  const bool haveCreds = (staSsid.length() > 0);
 
-  if (!haveCreds) {
+  WiFi.setSleep(false);
+  WiFi.persistent(false);
+  WiFi.setAutoReconnect(true);
+
+  if (!haveCreds)
+  {
+    Serial.println("No WiFi credentials - starting AP only mode");
     WiFi.mode(WIFI_AP);
-    startAP();
+    startAP(/*channel=*/1);
     return;
   }
 
-  // Start AP+STA so we can always reach it during connect attempt
+  // Mode first, but DON'T start AP yet (avoids channel conflicts)
   WiFi.mode(WIFI_AP_STA);
-  startAP();
 
+  // Connect STA
   bool ok = connectSTA(15000);
 
-  if (ok) {
-    if (!keepApWhenConnected) {
-      // STA only
+  if (ok)
+  {
+    if (!keepApWhenConnected)
+    {
+      Serial.println("WiFi connected - STA only");
       WiFi.mode(WIFI_STA);
-    } else {
-      // Keep AP up
-      WiFi.mode(WIFI_AP_STA);
-      // Re-assert AP config/hostname in case mode switch disturbed it
-      startAP();
+      return;
     }
-  } else {
-    // Stay AP+STA (AP is up, STA will keep trying in background)
-    WiFi.mode(WIFI_AP_STA);
+
+    // Now that STA is connected, start AP on the SAME channel
+    int ch = WiFi.channel();
+    Serial.printf("WiFi connected - starting AP on STA channel %d\n", ch);
+    startAP(ch);
+    return;
   }
+
+  // STA failed -> make AP available reliably
+  Serial.println("WiFi connection failed - AP only mode at 10.0.0.1");
+  WiFi.mode(WIFI_AP);
+  startAP(/*channel=*/1);
 }
 
-void setupOTA() {
+void setupOTA()
+{
+  ArduinoOTA
+      .onStart([]()
+               {
+      otaInProgress = true;
+
+      // 🔒 HARD ISOLATION FOR OTA
+      ws.close();
+      WiFi.mode(WIFI_STA);  // ❗ KILL AP DURING OTA
+      WiFi.setSleep(false); })
+      .onEnd([]()
+             {
+               otaInProgress = false;
+               ESP.restart(); // clean state after flash
+             })
+      .onError([](ota_error_t error)
+               {
+      otaInProgress = false;
+      ESP.restart(); });
+
   ArduinoOTA.setPassword(OTA_PASS);
   ArduinoOTA.setHostname("Incubator");
   ArduinoOTA.begin();
 }
 
-void handleStyleCss() {
+void handleStyleCss()
+{
   server.send_P(200, "text/css", STYLES);
 }
 
-void handleJavascript() {
+void handleJavascript()
+{
   server.send_P(200, "application/javascript", JAVASCRIPTS);
 }
 
-void handleRoot() {
+void handleRoot()
+{
   server.send_P(200, "text/html", INDEX_HTML);
 }
 
-void handleWifiPage() {
+void handleWifiPage()
+{
   server.send_P(200, "text/html", WIFI_HTML);
 }
 
 // Very small JSON extractor for {"tmin":x,"tmax":y} etc (no extra libs)
-bool getJsonFloat(const String& body, const char* key, float& out) {
+bool getJsonFloat(const String &body, const char *key, float &out)
+{
   String k = String("\"") + key + "\"";
   int i = body.indexOf(k);
-  if (i < 0) return false;
+  if (i < 0)
+    return false;
   i = body.indexOf(':', i);
-  if (i < 0) return false;
+  if (i < 0)
+    return false;
   int j = i + 1;
-  while (j < (int)body.length() && (body[j] == ' ')) j++;
+  while (j < (int)body.length() && (body[j] == ' '))
+    j++;
   int end = j;
-  while (end < (int)body.length() && (isDigit(body[end]) || body[end] == '-' || body[end] == '.')) end++;
-  if (end == j) return false;
+  while (end < (int)body.length() && (isDigit(body[end]) || body[end] == '-' || body[end] == '.'))
+    end++;
+  if (end == j)
+    return false;
   out = body.substring(j, end).toFloat();
   return true;
 }
 
-bool getJsonBool(const String& body, const char* key, bool& out) {
+bool getJsonBool(const String &body, const char *key, bool &out)
+{
   String k = String("\"") + key + "\"";
   int i = body.indexOf(k);
-  if (i < 0) return false;
+  if (i < 0)
+    return false;
   i = body.indexOf(':', i);
-  if (i < 0) return false;
+  if (i < 0)
+    return false;
   int j = i + 1;
-  while (j < (int)body.length() && (body[j] == ' ')) j++;
-  if (body.startsWith("true", j)) {
+  while (j < (int)body.length() && (body[j] == ' '))
+    j++;
+  if (body.startsWith("true", j))
+  {
     out = true;
     return true;
   }
-  if (body.startsWith("false", j)) {
+  if (body.startsWith("false", j))
+  {
     out = false;
     return true;
   }
   return false;
 }
 
-bool getJsonString(const String& body, const char* key, String& out) {
+bool getJsonString(const String &body, const char *key, String &out)
+{
   String k = String("\"") + key + "\"";
   int i = body.indexOf(k);
-  if (i < 0) return false;
+  if (i < 0)
+    return false;
   i = body.indexOf(':', i);
-  if (i < 0) return false;
+  if (i < 0)
+    return false;
   int j = body.indexOf('\"', i + 1);
-  if (j < 0) return false;
+  if (j < 0)
+    return false;
   int end = body.indexOf('\"', j + 1);
-  if (end < 0) return false;
+  if (end < 0)
+    return false;
   out = body.substring(j + 1, end);
   return true;
 }
 
-void handleApiRangePost() {
-  if (!server.hasArg("plain")) {
+void handleApiRangePost()
+{
+  if (!server.hasArg("plain"))
+  {
     server.send(400, "application/json", "{\"ok\":false,\"error\":\"Missing body\"}");
     return;
   }
 
   String body = server.arg("plain");
   float tmin, tmax;
-  if (!getJsonFloat(body, "tmin", tmin) || !getJsonFloat(body, "tmax", tmax)) {
+  if (!getJsonFloat(body, "tmin", tmin) || !getJsonFloat(body, "tmax", tmax))
+  {
     server.send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid JSON\"}");
     return;
   }
 
-  if (tmin < TEMP_MIN_ALLOWED_F || tmin > TEMP_MAX_ALLOWED_F || tmax < TEMP_MIN_ALLOWED_F || tmax > TEMP_MAX_ALLOWED_F) {
+  if (tmin < TEMP_MIN_ALLOWED_F || tmin > TEMP_MAX_ALLOWED_F || tmax < TEMP_MIN_ALLOWED_F || tmax > TEMP_MAX_ALLOWED_F)
+  {
     server.send(400, "application/json", "{\"ok\":false,\"error\":\"Out of allowed range\"}");
     return;
   }
-  if (tmin >= tmax) {
+  if (tmin >= tmax)
+  {
     server.send(400, "application/json", "{\"ok\":false,\"error\":\"Min must be < Max\"}");
     return;
   }
@@ -1441,7 +1750,8 @@ void handleApiRangePost() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
-void handleApiWifiGet() {
+void handleApiWifiGet()
+{
   String j = "{";
   j += "\"ssid\":\"" + jsonEscape(staSsid) + "\"";
   j += ",\"keep_ap\":" + String(keepApWhenConnected ? "true" : "false");
@@ -1449,8 +1759,10 @@ void handleApiWifiGet() {
   server.send(200, "application/json", j);
 }
 
-void handleApiWifiPost() {
-  if (!server.hasArg("plain")) {
+void handleApiWifiPost()
+{
+  if (!server.hasArg("plain"))
+  {
     server.send(400, "application/json", "{\"ok\":false,\"error\":\"Missing body\"}");
     return;
   }
@@ -1459,8 +1771,10 @@ void handleApiWifiPost() {
   String ssid, pass;
   bool keepAp = keepApWhenConnected;
 
-  if (!getJsonString(body, "ssid", ssid)) ssid = "";
-  if (!getJsonString(body, "pass", pass)) pass = "";
+  if (!getJsonString(body, "ssid", ssid))
+    ssid = "";
+  if (!getJsonString(body, "pass", pass))
+    pass = "";
   getJsonBool(body, "keep_ap", keepAp);
 
   saveWifi(ssid, pass, keepAp);
@@ -1474,14 +1788,17 @@ void handleApiWifiPost() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
-bool getJsonInt(const String& body, const char* key, int& out) {
+bool getJsonInt(const String &body, const char *key, int &out)
+{
   float f;
-  if (!getJsonFloat(body, key, f)) return false;
+  if (!getJsonFloat(body, key, f))
+    return false;
   out = (int)f;
   return true;
 }
 
-void setupHttpRoutes() {
+void setupHttpRoutes()
+{
   server.on("/", HTTP_GET, handleRoot);
   server.on("/wifi", HTTP_GET, handleWifiPage);
   server.on("/style.css", HTTP_GET, handleStyleCss);
@@ -1496,112 +1813,119 @@ void setupHttpRoutes() {
 
   server.on("/api/reset", HTTP_POST, handleApiResetPost);
 
-  server.onNotFound([]() {
-    server.send(404, "text/plain", "Not found");
-  });
+  server.onNotFound([]()
+                    { server.send(404, "text/plain", "Not found"); });
 
   server.begin();
 }
 
-
-void onWsEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
+void onWsEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
+{
   (void)payload;
   (void)length;
-  if (type == WStype_CONNECTED) {
+  if (type == WStype_CONNECTED)
+  {
     // Send current status immediately to the new client
     String msg = buildStatusJson();
     ws.sendTXT(num, msg);
   }
 }
 
-void lockStaMac() {
-  uint64_t mac64 = ESP.getEfuseMac();  // 48-bit base MAC in lower bits
+void lockStaMac()
+{
+  uint64_t mac64 = ESP.getEfuseMac(); // 48-bit base MAC in lower bits
   uint8_t mac[6];
 
   mac[0] = (mac64 >> 40) & 0xFF;
   mac[1] = (mac64 >> 32) & 0xFF;
   mac[2] = (mac64 >> 24) & 0xFF;
   mac[3] = (mac64 >> 16) & 0xFF;
-  mac[4] = (mac64 >> 8)  & 0xFF;
+  mac[4] = (mac64 >> 8) & 0xFF;
   mac[5] = mac64 & 0xFF;
 
   esp_wifi_set_mac(WIFI_IF_STA, mac);
 }
 
-
-void setup() {
+void setup()
+{
   Serial.begin(115200);
+
+  // ---- CRITICAL: Kill any auto-started WiFi/AP before anything else ----
+  WiFi.mode(WIFI_OFF);
+  delay(100);
+
+  // ---- MAC + GPIO ----
   lockStaMac();
 
   pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, LOW);  // Start with lamp OFF until we get valid sensor reading
+  digitalWrite(RELAY_PIN, LOW);
   relayOn = false;
   lastRelayOn = relayOn;
-  
+
   pinMode(TEMP_ALARM_PIN, OUTPUT);
   digitalWrite(TEMP_ALARM_PIN, LOW);
+
   pinMode(HUMIDITY_ALARM_PIN, OUTPUT);
   digitalWrite(HUMIDITY_ALARM_PIN, LOW);
 
-  loadPrefs();  // Load preferences BEFORE sensor reads so targetMinF/targetMaxF are set correctly
+  // ---- Preferences ----
+  loadPrefs(); // must happen before control logic
 
+  // ---- Sensor init (BEFORE WiFi to avoid timing interference) ----
   dht.begin();
-  delay(2500); // DHT22 needs time to stabilize
+  delay(2500); // DHT22 stabilization
 
-  // Try to read sensor immediately after initialization (before WiFi setup)
-  // This ensures no interference from WiFi initialization
   bool sensorRead = false;
-  for (int attempt = 0; attempt < 3; attempt++) {
+  for (int attempt = 0; attempt < 3; attempt++)
+  {
     float tempC = dht.readTemperature();
     delay(100);
     float hum = dht.readHumidity();
-    
-    if (!isnan(tempC) && !isnan(hum) && tempC > -50.0f && tempC < 100.0f && hum >= 0.0f && hum <= 100.0f) {
+
+    if (!isnan(tempC) && !isnan(hum) && tempC > -50.0f && tempC < 100.0f && hum >= 0.0f && hum <= 100.0f)
+    {
+
       lastTempC = tempC;
       lastTempF = cToF(tempC);
       lastRH = hum;
       lastAbsH = absoluteHumidity_gm3(tempC, hum);
-      
+
       lastDewC = dewPointC(lastTempC, lastRH);
       lastDewF = isnan(lastDewC) ? NAN : cToF(lastDewC);
-      
+
       lastHeatF = dht.computeHeatIndex(lastTempF, lastRH, true);
       lastHeatC = isnan(lastHeatF) ? NAN : ((lastHeatF - 32.0f) * 5.0f / 9.0f);
-      
+
       recordTempPeak(lastTempF);
-      
-      if (lastTempF <= targetMinF) relayOn = true;
-      else if (lastTempF >= targetMaxF) relayOn = false;
-      
+
+      if (lastTempF <= targetMinF)
+        relayOn = true;
+      else if (lastTempF >= targetMaxF)
+        relayOn = false;
+
       digitalWrite(RELAY_PIN, relayOn ? HIGH : LOW);
-      
-      // Update alarm pins (within 0.5°F for temp, within 5% for humidity)
-      bool tempAlarm = false;
-      bool humidityAlarm = false;
-      if (!isnan(lastTempF) && !isnan(targetMinF) && !isnan(targetMaxF)) {
-        tempAlarm = (lastTempF < (targetMinF - 0.5f) || lastTempF > (targetMaxF + 0.5f));
-      }
-      if (!isnan(lastRH) && !isnan(targetHMin) && !isnan(targetHMax)) {
-        humidityAlarm = (lastRH < (targetHMin - 5.0f) || lastRH > (targetHMax + 5.0f));
-      }
+
+      bool tempAlarm = (lastTempF < (targetMinF - 0.5f) || lastTempF > (targetMaxF + 0.5f));
+      bool humidityAlarm = (lastRH < (targetHMin - 5.0f) || lastRH > (targetHMax + 5.0f));
+
       digitalWrite(TEMP_ALARM_PIN, tempAlarm ? HIGH : LOW);
       digitalWrite(HUMIDITY_ALARM_PIN, humidityAlarm ? HIGH : LOW);
-      
+
       sensorRead = true;
-      break; // Success, exit retry loop
+      break;
     }
-    
-    // Wait before retry (DHT22 needs time between reads)
-    if (attempt < 2) delay(2000);
+
+    if (attempt < 2)
+      delay(2000);
   }
-  
-  // If sensor read failed, ensure lamp is OFF and values are null
-  if (!sensorRead) {
+
+  if (!sensorRead)
+  {
     relayOn = false;
     digitalWrite(RELAY_PIN, LOW);
-    // Set alarms HIGH when sensor fails (unknown state = alarm)
     digitalWrite(TEMP_ALARM_PIN, HIGH);
     digitalWrite(HUMIDITY_ALARM_PIN, HIGH);
+
     lastTempC = NAN;
     lastTempF = NAN;
     lastRH = NAN;
@@ -1612,30 +1936,62 @@ void setup() {
     lastHeatF = NAN;
   }
 
+  // ---- WiFi (explicit + controlled) ----
   WiFi.setSleep(false);
-  WiFi.setHostname("Incubator");  // Set hostname for DHCP recognition
-  applyWifiMode();
+  WiFi.setHostname("Incubator");
+  applyWifiMode(); // THIS is where "Incubator" AP is created
 
+  // ---- Time ----
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 
+  // ---- OTA (with suspension logic already discussed) ----
   setupOTA();
 
+  // ---- Networking ----
   ws.begin();
   ws.onEvent(onWsEvent);
 
   setupHttpRoutes();
-  
+
+  // ---- Initial broadcast ----
   lastSensorMs = millis();
   wsBroadcastStatus();
+
+  // ---- Diagnostics ----
+  Serial.println("=== Setup Complete ===");
+  Serial.print("AP IP: ");
+  Serial.println(WiFi.softAPIP());
+
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    Serial.print("STA IP: ");
+    Serial.println(WiFi.localIP());
+    Serial.println("Arduino IDE OTA should show: Incubator at [IP]");
+  }
+  else
+  {
+    Serial.println("STA: Not connected");
+  }
+
+  Serial.println("Web UI: http://10.0.0.1 or http://[STA_IP]");
 }
 
-void loop() {
+void loop()
+{
   ArduinoOTA.handle();
+
+  if (otaInProgress)
+  {
+    delay(1);
+    return;
+  }
+
   server.handleClient();
   ws.loop();
 
   uint32_t now = millis();
-  if (now - lastSensorMs < SENSOR_INTERVAL_MS) return;
+  if (now - lastSensorMs < SENSOR_INTERVAL_MS)
+    return;
   lastSensorMs = now;
 
   // Read sensor with validation
@@ -1646,9 +2002,8 @@ void loop() {
   float hum = dht.readHumidity();
 
   // Validate readings are within reasonable ranges
-  if (!isnan(tempC) && !isnan(hum) && 
-      tempC > -50.0f && tempC < 100.0f && 
-      hum >= 0.0f && hum <= 100.0f) {
+  if (!isnan(tempC) && !isnan(hum) && tempC > -50.0f && tempC < 100.0f && hum >= 0.0f && hum <= 100.0f)
+  {
     // Valid sensor reading
     lastTempC = tempC;
     lastTempF = cToF(tempC);
@@ -1664,32 +2019,38 @@ void loop() {
     recordTempPeak(lastTempF);
 
     lastRelayOn = relayOn;
-    if (lastTempF <= targetMinF) relayOn = true;
-    else if (lastTempF >= targetMaxF) relayOn = false;
+    if (lastTempF <= targetMinF)
+      relayOn = true;
+    else if (lastTempF >= targetMaxF)
+      relayOn = false;
 
     digitalWrite(RELAY_PIN, relayOn ? HIGH : LOW);
-    
+
     // Update alarm pins (within 0.5°F for temp, within 5% for humidity)
     bool tempAlarm = false;
     bool humidityAlarm = false;
-    if (!isnan(lastTempF) && !isnan(targetMinF) && !isnan(targetMaxF)) {
+    if (!isnan(lastTempF) && !isnan(targetMinF) && !isnan(targetMaxF))
+    {
       tempAlarm = (lastTempF < (targetMinF - 0.5f) || lastTempF > (targetMaxF + 0.5f));
     }
-    if (!isnan(lastRH) && !isnan(targetHMin) && !isnan(targetHMax)) {
+    if (!isnan(lastRH) && !isnan(targetHMin) && !isnan(targetHMax))
+    {
       humidityAlarm = (lastRH < (targetHMin - 5.0f) || lastRH > (targetHMax + 5.0f));
     }
     digitalWrite(TEMP_ALARM_PIN, tempAlarm ? HIGH : LOW);
     digitalWrite(HUMIDITY_ALARM_PIN, humidityAlarm ? HIGH : LOW);
-    
+
     wsBroadcastStatus();
-  } else {
+  }
+  else
+  {
     // SENSOR DEAD → LAMP OFF (safety: don't heat if we can't read temp)
     relayOn = false;
     digitalWrite(RELAY_PIN, LOW);
     // Set alarms HIGH when sensor is dead (unknown state = alarm)
     digitalWrite(TEMP_ALARM_PIN, HIGH);
     digitalWrite(HUMIDITY_ALARM_PIN, HIGH);
-    
+
     // Always clear sensor values when read fails
     lastTempC = NAN;
     lastTempF = NAN;
@@ -1699,10 +2060,11 @@ void loop() {
     lastDewF = NAN;
     lastHeatC = NAN;
     lastHeatF = NAN;
-    
+
     // Broadcast status when sensor fails (so UI shows null and lamp OFF)
     static uint32_t lastDeadBroadcast = 0;
-    if (now - lastDeadBroadcast > 2000) { // Broadcast every 2 seconds when dead
+    if (now - lastDeadBroadcast > 2000)
+    { // Broadcast every 2 seconds when dead
       lastDeadBroadcast = now;
       wsBroadcastStatus();
     }
