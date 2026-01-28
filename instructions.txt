@@ -1,0 +1,371 @@
+ESP32 Incubator Firmware – Project Architecture Plan
+Overview
+
+This firmware controls an incubator using an ESP32-S3.
+It supports egg holding (preservation) and incubation, with profile-driven temperature/humidity targets, automatic egg turning via a stepper motor, and a web UI with real-time updates.
+
+The system is intentionally modular, with strict separation of concerns.
+All behavior is driven by data + state, not hardcoded logic.
+
+Core Design Principles
+
+incubator.ino is the entry point only
+
+All state lives in one place
+
+All decisions live in one place
+
+Sensors provide data, they do not decide
+
+Actuators act, they do not decide
+
+UI never directly controls hardware
+
+Profiles are data, not logic
+
+Custom profiles modify ProcessState, not global defaults
+
+File List (Flat Arduino Sketch Folder)
+incubator/
+├── incubator.ino
+├── app_state.h
+├── app_state.cpp
+├── core_controller.h
+├── core_controller.cpp
+├── sensor_dht.h
+├── sensor_dht.cpp
+├── motor_stepper.h
+├── motor_stepper.cpp
+├── web_server.h
+├── web_server.cpp
+├── ws_server.h
+├── ws_server.cpp
+├── web_assets.h
+
+File-by-File Responsibilities
+1. incubator.ino
+
+Role: Application entry point (Arduino equivalent of main.cpp)
+
+Contains:
+
+setup()
+
+loop()
+
+Initialization order
+
+Calls into other modules
+
+Does NOT contain:
+
+Logic
+
+State
+
+Math
+
+Web routes
+
+Hardware control
+
+Responsibilities:
+
+Initialize subsystems
+
+Call periodic “tick” functions
+
+2. app_state.h / app_state.cpp
+
+Role: Single source of truth for all data and runtime state
+
+Contains:
+
+Enums:
+
+EggProfileId
+
+ProcessType (NONE / EGG_HOLDING / INCUBATION)
+
+ControlMode (UNMANAGED / MANAGED)
+
+Structs:
+
+EggProfileData (static biological defaults)
+
+ProcessState (runtime process)
+
+Global instance:
+
+ProcessState process
+
+Persistent storage (NVS):
+
+load/save of ProcessState
+
+Profile lookup:
+
+getProfile(profileId)
+
+Does NOT contain:
+
+Control logic
+
+Sensor reads
+
+Motor control
+
+Web code
+
+Purpose:
+Everything the system knows lives here.
+
+3. core_controller.h / core_controller.cpp
+
+Role: Brain of the system (decision engine)
+
+Contains:
+
+Process lifecycle:
+
+start
+
+cancel
+
+transition holding → incubation
+
+Day tracking (epoch → day count)
+
+Target resolution:
+
+derives effective temp/humidity/turning from:
+
+ProcessState
+
+EggProfileData
+
+Heater / alarm decisions (later)
+
+Egg turning scheduling
+
+Calls motor driver when it is time to turn eggs
+
+Does NOT contain:
+
+Sensor math
+
+Web routes
+
+HTML
+
+GPIO pin definitions (except via other modules)
+
+Purpose:
+Given the current state and data, decide what should happen.
+
+4. sensor_dht.h / sensor_dht.cpp
+
+Role: Environmental data provider
+
+Contains:
+
+DHT22 initialization
+
+Sensor reads
+
+Derived metrics:
+
+Temp °C / °F
+
+Relative humidity
+
+Absolute humidity
+
+Dew point
+
+Heat index
+
+SensorData struct
+
+Does NOT contain:
+
+Targets
+
+Profiles
+
+Decisions
+
+Control logic
+
+Purpose:
+Return the current environment as data, nothing more.
+
+5. motor_stepper.h / motor_stepper.cpp
+
+Role: Egg-turning actuator
+
+Contains:
+
+Stepper motor pin configuration
+
+Initialization
+
+Single “turn eggs” action
+
+Busy / safety state
+
+Does NOT contain:
+
+Scheduling
+
+Profiles
+
+Timing decisions
+
+Web/UI logic
+
+Purpose:
+Physically rotate eggs when instructed by the core controller.
+
+6. web_server.h / web_server.cpp
+
+Role: HTTP server and REST API
+
+Contains:
+
+WebServer instance
+
+Route registration
+
+Endpoints such as:
+
+/ (UI)
+
+/api/state
+
+/api/process/start
+
+/api/process/cancel
+
+/api/process/transition
+
+JSON serialization of state
+
+Does NOT contain:
+
+HTML strings
+
+Control logic
+
+Hardware access
+
+Purpose:
+Allow the UI (or future clients) to view and modify state safely.
+
+7. ws_server.h / ws_server.cpp
+
+Role: Real-time push channel
+
+Contains:
+
+WebSocket server
+
+Client connect/disconnect handling
+
+Periodic broadcast of:
+
+sensor data
+
+process state
+
+resolved targets
+
+motor status
+
+Does NOT contain:
+
+Decisions
+
+Hardware control
+
+State mutation (except acknowledgements)
+
+Purpose:
+Keep the UI in sync with the running system.
+
+8. web_assets.h
+
+Role: Static web UI content
+
+Contains:
+
+INDEX_HTML
+
+CSS
+
+JavaScript
+
+Does NOT contain:
+
+Logic
+
+State
+
+Routing
+
+C++ code
+
+Purpose:
+Provide a human interface without coupling to firmware logic.
+
+Functional Features (Implemented or Planned)
+
+Egg holding (preservation) mode
+
+Incubation mode
+
+Profile-based biological defaults
+
+Custom profile support
+
+Day tracking from arbitrary start day
+
+Automatic egg turning via stepper motor
+
+Real-time UI updates
+
+Persistent recovery after reboot
+
+Safe transitions between modes
+
+Future-ready humidity control
+
+Future-ready rescue / override modes
+
+Key Architectural Guarantees
+
+No duplicated state
+
+No hidden coupling
+
+No UI-driven hardware access
+
+Profiles are immutable defaults
+
+Custom behavior lives in ProcessState
+
+Hardware can be swapped without refactoring logic
+
+Mental Model Summary
+
+app_state = what the system is
+
+sensor_dht = what the environment is
+
+core_controller = what the system decides
+
+motor_stepper = what the system does physically
+
+web_server / ws_server = how humans interact
+
+incubator.ino = glue, nothing else

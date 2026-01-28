@@ -1,4 +1,4 @@
-# ESP32 Chicken Egg Incubator
+# ESP32 Egg Incubator
 ### John Minton <cjohnweb@gmail.com>
 
 An ESP32-S3 based incubator controller with web interface, real-time sensor monitoring, and automatic temperature control. **Supports 37 preconfigured bird species with optimized temperature profiles, plus a Custom mode for any other species or specific temperature requirements.**
