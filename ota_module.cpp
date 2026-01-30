@@ -1,10 +1,11 @@
-#include "ota_manager.h"
+#include "ota_module.h"
 #include <ArduinoOTA.h>
 
 volatile bool otaInProgress = false;
 
-void otaInit()
+void ota_setup()
 {
+  ArduinoOTA.setHostname("incubator");
   ArduinoOTA
     .onStart([]() {
       otaInProgress = true;
@@ -19,7 +20,7 @@ void otaInit()
   ArduinoOTA.begin();
 }
 
-void otaLoop()
+void ota_loop()
 {
   ArduinoOTA.handle();
 }

@@ -67,7 +67,7 @@ enum EggProfileId : uint8_t {
 /* =========================
    Static Egg Profile Data
    ========================= */
-// Note: EggProfileData is defined in profiles.h
+// Note: EggProfileData is defined in profiles_module.h
 
 /* =========================
    Runtime Process State
@@ -124,3 +124,7 @@ void saveProcessState();
 void resetProcessState();
 bool isCustomProfileActive();
 bool isProcessRunning();
+
+/* Module lifecycle */
+void appstate_setup();
+void appstate_loop();

@@ -20,7 +20,9 @@ struct SensorReadings {
    Public API
    ========================= */
 
-void sensorInit(uint8_t dhtPin);
+void dht_setup(uint8_t dhtPin);
+void dht_loop();
+
 bool sensorRead(SensorReadings &out);
 
 /* =========================

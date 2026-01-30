@@ -1,4 +1,4 @@
-#include "sensor_dht.h"
+#include "dht_module.h"
 #include <DHT.h>
 #include <math.h>
 
@@ -6,10 +6,10 @@ static DHT *dht = nullptr;
 static uint8_t dhtPinInternal = 0;
 
 /* =========================
-   Initialization
+   Module lifecycle
    ========================= */
 
-void sensorInit(uint8_t dhtPin)
+void dht_setup(uint8_t dhtPin)
 {
   dhtPinInternal = dhtPin;
 
@@ -18,6 +18,11 @@ void sensorInit(uint8_t dhtPin)
 
   dht = new DHT(dhtPinInternal, DHT22);
   dht->begin();
+}
+
+void dht_loop()
+{
+  /* No periodic work; reads are done by caller (e.g. core_module). */
 }
 
 /* =========================
@@ -65,7 +70,6 @@ float cToF(float c)
   return (c * 9.0f / 5.0f) + 32.0f;
 }
 
-// AH = 216.7 * ( (RH/100) * 6.112 * exp(17.67*T/(T+243.5)) ) / (T+273.15)
 float absoluteHumidity_gm3(float tempC, float rh)
 {
   float es = 6.112f * expf((17.67f * tempC) / (tempC + 243.5f));
@@ -73,7 +77,6 @@ float absoluteHumidity_gm3(float tempC, float rh)
   return 216.7f * (e / (tempC + 273.15f));
 }
 
-// Magnus formula
 float dewPointC(float tempC, float rh)
 {
   if (rh <= 0.0f)

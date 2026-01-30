@@ -9,7 +9,7 @@
   Exposes a single flag to block control logic during updates.
 */
 
-void otaInit();
-void otaLoop();
+void ota_setup();
+void ota_loop();
 
 extern volatile bool otaInProgress;

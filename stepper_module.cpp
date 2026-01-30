@@ -1,4 +1,4 @@
-#include "motor_stepper.h"
+#include "stepper_module.h"
 #include <time.h>
 
 static StepperConfig config;
@@ -7,7 +7,7 @@ static uint32_t absolutePosition = 0; // Total steps taken (0 = 0°, stepsPerTur
 static time_t lastTurnEpoch = 0;
 static uint32_t currentTurnsPerDay = 0;
 
-void stepperInit(const StepperConfig &cfg)
+void stepper_setup(const StepperConfig &cfg)
 {
   config = cfg;
 
@@ -22,6 +22,11 @@ void stepperInit(const StepperConfig &cfg)
   lastTurnEpoch = 0;
   currentTurnsPerDay = 0;
   initialized = true;
+}
+
+void stepper_loop()
+{
+  /* No periodic work; turning is triggered by core_module. */
 }
 
 void stepperEnable(bool enable)
@@ -47,7 +52,7 @@ void stepperTurnOnce()
 
   // Update position (one full rotation = 360 degrees)
   absolutePosition += config.stepsPerTurn;
-  
+
   // Update last turn time
   time_t now = time(nullptr);
   if (now >= 100000) {
@@ -60,7 +65,7 @@ void stepperTurnOnce()
 MotorStatus stepperGetStatus()
 {
   MotorStatus status;
-  
+
   if (!initialized) {
     status.absolutePosition = 0;
     status.rotationPhase = 0.0f;
@@ -71,11 +76,11 @@ MotorStatus stepperGetStatus()
   }
 
   status.absolutePosition = absolutePosition;
-  
+
   // Calculate phase: position modulo one full rotation, converted to degrees
   uint32_t positionInCurrentRotation = absolutePosition % config.stepsPerTurn;
   status.rotationPhase = (float)positionInCurrentRotation * 360.0f / (float)config.stepsPerTurn;
-  
+
   status.lastTurnEpoch = lastTurnEpoch;
   status.turnsPerDay = currentTurnsPerDay;
 
@@ -85,10 +90,10 @@ MotorStatus stepperGetStatus()
     if (now < 100000) {
       now = (time_t)(millis() / 1000);
     }
-    
+
     uint32_t intervalSec = 86400UL / currentTurnsPerDay;
     uint32_t elapsed = (uint32_t)(now - lastTurnEpoch);
-    
+
     if (elapsed < intervalSec) {
       status.secondsUntilNextTurn = intervalSec - elapsed;
     } else {
@@ -101,7 +106,6 @@ MotorStatus stepperGetStatus()
   return status;
 }
 
-// Update the target turns per day (called by core_controller when process starts/changes)
 void stepperSetTurnsPerDay(uint32_t turns)
 {
   currentTurnsPerDay = turns;

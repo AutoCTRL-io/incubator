@@ -32,7 +32,9 @@ struct MotorStatus {
   uint32_t secondsUntilNextTurn; // Time until next scheduled turn
 };
 
-void stepperInit(const StepperConfig &cfg);
+void stepper_setup(const StepperConfig &cfg);
+void stepper_loop();
+
 void stepperEnable(bool enable);
 void stepperTurnOnce();
 MotorStatus stepperGetStatus();

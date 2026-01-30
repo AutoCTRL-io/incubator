@@ -2,7 +2,6 @@
 
 #include <Arduino.h>
 #include <WebServer.h>
-#include "app_state.h"
 
 /*
   HTTP Web Server
@@ -11,5 +10,5 @@
   No WebSocket logic here.
 */
 
-void webServerInit(WebServer &server);
-void webServerLoop(WebServer &server);
+void webserver_setup(WebServer &server);
+void webserver_loop(WebServer &server);

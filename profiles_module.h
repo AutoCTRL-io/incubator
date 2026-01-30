@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
-#include "app_state.h"
+#include "appstate_module.h"
 
 /*
   Egg Profile Data
@@ -35,3 +35,7 @@ extern const EggProfileData EGG_PROFILES[];
 extern const uint8_t EGG_PROFILE_COUNT;
 
 const EggProfileData *getProfileById(uint8_t id);
+
+/* Module lifecycle */
+void profiles_setup();
+void profiles_loop();

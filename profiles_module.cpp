@@ -1,4 +1,4 @@
-#include "profiles.h"
+#include "profiles_module.h"
 #include <math.h>
 
 /*
@@ -255,4 +255,13 @@ const EggProfileData *getProfileById(uint8_t id)
       return &EGG_PROFILES[i];
   }
   return nullptr;
+}
+
+/* Module lifecycle (no runtime init). */
+void profiles_setup()
+{
+}
+
+void profiles_loop()
+{
 }

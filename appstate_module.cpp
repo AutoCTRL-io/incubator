@@ -1,4 +1,4 @@
-#include "app_state.h"
+#include "appstate_module.h"
 #include <Preferences.h>
 
 /* =========================
@@ -41,7 +41,7 @@ EggProfileId currentProfile = PROFILE_CHICKEN;
 /* =========================
    System Flags
    ========================= */
-// Note: otaInProgress is defined in ota_manager.cpp
+// Note: otaInProgress is defined in ota_module.cpp
 
 /* =========================
    NVS Persistence
@@ -62,7 +62,7 @@ void loadProcessState()
   process.active = prefs.getBool("active", false);
   process.controlMode = (ControlMode)prefs.getUChar("controlMode", CONTROL_UNMANAGED);
   process.processType = (ProcessType)prefs.getUChar("processType", PROCESS_NONE);
-  
+
   uint8_t loadedProfileId = prefs.getUChar("profileId", PROFILE_CHICKEN);
   // Validate profileId is within valid range
   if (loadedProfileId <= PROFILE_CUSTOM) {
@@ -148,4 +148,18 @@ bool isCustomProfileActive()
 bool isProcessRunning()
 {
   return process.active && process.processType != PROCESS_NONE;
+}
+
+/* =========================
+   Module lifecycle
+   ========================= */
+
+void appstate_setup()
+{
+  loadProcessState();
+}
+
+void appstate_loop()
+{
+  /* No periodic work. */
 }

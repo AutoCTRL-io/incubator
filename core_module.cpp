@@ -1,8 +1,5 @@
-#include "core_controller.h"
+#include "core_module.h"
 #include <time.h>
-#include "app_state.h"
-
-extern EggProfileId currentProfile;
 
 static uint16_t computeCurrentDay()
 {
@@ -43,10 +40,15 @@ static void updateTargets()
   }
 }
 
-void coreInit()
+void core_setup()
 {
   process.currentDay = 0;
   updateTargets();
+}
+
+void core_loop()
+{
+  /* coreUpdate() is called by main loop with sensor data when those modules are active. */
 }
 
 bool startProcess(ProcessType type, uint8_t profileId, uint16_t startDay)
@@ -66,7 +68,6 @@ bool startProcess(ProcessType type, uint8_t profileId, uint16_t startDay)
 
   time_t now = time(nullptr);
   if (now < 100000) {
-    // Time not set, use millis-based fallback
     process.startEpoch = (time_t)(millis() / 1000);
   } else {
     process.startEpoch = now;
@@ -75,7 +76,6 @@ bool startProcess(ProcessType type, uint8_t profileId, uint16_t startDay)
   process.currentDay = startDay;
   process.lastTurnEpoch = 0;
 
-  // Update motor turns per day
   if (profileId == PROFILE_CUSTOM && process.customTurnsPerDay > 0) {
     stepperSetTurnsPerDay(process.customTurnsPerDay);
   } else {
@@ -97,7 +97,7 @@ void cancelProcess()
   process.startDay = 1;
   process.currentDay = 0;
   process.lastTurnEpoch = 0;
-  currentProfile = PROFILE_CHICKEN; // Reset to default
+  currentProfile = PROFILE_CHICKEN;
 
   updateTargets();
   saveProcessState();
@@ -109,13 +109,12 @@ bool transitionProcess()
   if (process.processType != PROCESS_EGG_HOLDING) return false;
 
   process.processType = PROCESS_INCUBATION;
-  
-  // Update motor turns per day for incubation
+
   const EggProfileData *p = getProfileById(process.profileId);
   if (p) {
     stepperSetTurnsPerDay(p->incTurnsPerDay);
   }
-  
+
   updateTargets();
   saveProcessState();
   return true;
@@ -128,15 +127,12 @@ void coreUpdate(const SensorReadings &sensor)
   if (!process.active)
     return;
 
-  // Update current day
   process.currentDay = computeCurrentDay();
 
-  // Check if process should auto-complete
   const EggProfileData *p = getProfileById(process.profileId);
   if (p && process.processType == PROCESS_INCUBATION) {
     uint16_t totalDays = isCustomProfileActive() ? process.customTotalDays : p->incTotalDays;
     if (totalDays > 0 && process.currentDay >= totalDays) {
-      // Process completed
       process.active = false;
       process.processType = PROCESS_NONE;
       saveProcessState();
@@ -144,12 +140,10 @@ void coreUpdate(const SensorReadings &sensor)
     }
   }
 
-  // Check if eggs should be turned
   if (shouldTurnEggs()) {
     stepperTurnOnce();
     markEggsTurned();
-    
-    // Update motor turns per day if using custom profile
+
     if (isCustomProfileActive() && process.customTurnsPerDay > 0) {
       stepperSetTurnsPerDay(process.customTurnsPerDay);
     }
@@ -230,7 +224,7 @@ bool shouldTurnEggs()
     return false;
 
   time_t now = time(nullptr);
-  if (now < 100000) return false; // Time not set
+  if (now < 100000) return false;
 
   if (process.lastTurnEpoch == 0)
     return true;

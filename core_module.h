@@ -1,12 +1,14 @@
 #pragma once
 
 #include <Arduino.h>
-#include "app_state.h"
-#include "profiles.h"
-#include "sensor_dht.h"
-#include "motor_stepper.h"
+#include "appstate_module.h"
+#include "profiles_module.h"
+#include "dht_module.h"
+#include "stepper_module.h"
 
-void coreInit();
+void core_setup();
+void core_loop();
+
 void coreUpdate(const SensorReadings &sensor);
 
 // Process lifecycle

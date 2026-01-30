@@ -7,6 +7,10 @@ It supports egg holding (preservation) and incubation, with profile-driven tempe
 The system is intentionally modular, with strict separation of concerns.
 All behavior is driven by data + state, not hardcoded logic.
 
+Each module is named x_module (e.g. wifi_module, webserver_module) and exposes:
+  x_setup()  — called once from setup() in incubator.ino
+  x_loop()   — called each iteration of loop() in incubator.ino
+
 Core Design Principles
 
 incubator.ino is the entry point only
@@ -28,19 +32,26 @@ Custom profiles modify ProcessState, not global defaults
 File List (Flat Arduino Sketch Folder)
 incubator/
 ├── incubator.ino
-├── app_state.h
-├── app_state.cpp
-├── core_controller.h
-├── core_controller.cpp
-├── sensor_dht.h
-├── sensor_dht.cpp
-├── motor_stepper.h
-├── motor_stepper.cpp
-├── web_server.h
-├── web_server.cpp
-├── ws_server.h
-├── ws_server.cpp
-├── web_assets.h
+├── appstate_module.h
+├── appstate_module.cpp
+├── core_module.h
+├── core_module.cpp
+├── dht_module.h
+├── dht_module.cpp
+├── stepper_module.h
+├── stepper_module.cpp
+├── webserver_module.h
+├── webserver_module.cpp
+├── ws_module.h
+├── ws_module.cpp
+├── webassets_module.h
+├── webassets_module.cpp
+├── wifi_module.h
+├── wifi_module.cpp
+├── ota_module.h
+├── ota_module.cpp
+├── profiles_module.h
+├── profiles_module.cpp
 
 File-by-File Responsibilities
 1. incubator.ino
@@ -71,11 +82,10 @@ Hardware control
 
 Responsibilities:
 
-Initialize subsystems
+Initialize subsystems (call each module’s x_setup() in setup())
+Call periodic “tick” functions (call each module’s x_loop() in loop())
 
-Call periodic “tick” functions
-
-2. app_state.h / app_state.cpp
+2. appstate_module.h / appstate_module.cpp
 
 Role: Single source of truth for all data and runtime state
 
@@ -163,7 +173,7 @@ GPIO pin definitions (except via other modules)
 Purpose:
 Given the current state and data, decide what should happen.
 
-4. sensor_dht.h / sensor_dht.cpp
+4. dht_module.h / dht_module.cpp
 
 Role: Environmental data provider
 
@@ -200,7 +210,7 @@ Control logic
 Purpose:
 Return the current environment as data, nothing more.
 
-5. motor_stepper.h / motor_stepper.cpp
+5. stepper_module.h / stepper_module.cpp
 
 Role: Egg-turning actuator
 
@@ -262,7 +272,7 @@ Hardware access
 Purpose:
 Allow the UI (or future clients) to view and modify state safely.
 
-7. ws_server.h / ws_server.cpp
+7. ws_module.h / ws_module.cpp
 
 Role: Real-time push channel
 
@@ -358,14 +368,16 @@ Hardware can be swapped without refactoring logic
 
 Mental Model Summary
 
-app_state = what the system is
+appstate_module = what the system is
 
-sensor_dht = what the environment is
+dht_module = what the environment is
 
-core_controller = what the system decides
+core_module = what the system decides
 
-motor_stepper = what the system does physically
+stepper_module = what the system does physically
 
-web_server / ws_server = how humans interact
+webserver_module / ws_module = how humans interact
+
+wifi_module = network (AP/STA); wifi_loop() prints WiFi IP every 1s
 
 incubator.ino = glue, nothing else
