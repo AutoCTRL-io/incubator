@@ -34,6 +34,8 @@ incubator/
 ├── incubator.ino
 ├── appstate_module.h
 ├── appstate_module.cpp
+├── loader_module.h
+├── loader_module.cpp
 ├── core_module.h
 ├── core_module.cpp
 ├── dht_module.h
@@ -84,6 +86,7 @@ Responsibilities:
 
 Initialize subsystems (call each module’s x_setup() in setup())
 Call periodic “tick” functions (call each module’s x_loop() in loop())
+Startup order: appstate_setup() first (defaults), then loader_setup() (load from NVS), then wifi_setup(loader creds), etc.
 
 2. appstate_module.h / appstate_module.cpp
 
@@ -111,7 +114,7 @@ ProcessState process
 
 Persistent storage (NVS):
 
-load/save of ProcessState
+saveProcessState() only; load is done by loader_module
 
 Profile lookup:
 
@@ -128,9 +131,21 @@ Motor control
 Web code
 
 Purpose:
-Everything the system knows lives here.
+Everything the system knows lives here (default values). Loader overwrites from NVS if data exists.
 
-3. core_controller.h / core_controller.cpp
+2b. loader_module.h / loader_module.cpp
+
+Role: Load persisted data from a previous run; overwrite appstate and provide WiFi credentials.
+
+Contains:
+  loader_setup() — open NVS namespace "incubator", read ssid/pass (WiFi), profile, tmin/tmax/hmin/hmax (targets), full process state if "valid"; overwrite appstate globals; store WiFi creds for wifi_setup.
+  loader_getStaSsid() / loader_getStaPass() — pass to wifi_setup after loader_setup().
+
+Does NOT contain: Default values (appstate sets those). NVS write (appstate and wifi save; loader only reads).
+
+Purpose: Single place that retrieves stored data; runs after appstate so defaults are established first, then overwritten if data exists.
+
+3. core_module.h / core_module.cpp
 
 Role: Brain of the system (decision engine)
 

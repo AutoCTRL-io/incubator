@@ -6,13 +6,13 @@
 /*
   Stepper Motor Controller
   ------------------------
-  Responsible for:
-  - Initializing motor pins
-  - Rotating eggs by a fixed step count
-  - Tracking absolute position and rotation phase
-  - Abstracting hardware from core logic
-
-  This module does NOT decide *when* to turn eggs.
+  Design (for real implementation):
+  - Stepper should own ALL code that checks the time and turns the motor.
+  - Call stepper from the main loop (preferred), or from core—not both.
+  - Best: main loop calls stepper; stepper reads app state directly and
+    decides when to run (if at all). Less coupling = more flexibility.
+  - Responsible for: init pins, rotate by step count, track position/phase,
+    and (when implemented) reading app state to decide when to turn.
 */
 
 struct StepperConfig {

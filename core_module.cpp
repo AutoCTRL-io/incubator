@@ -1,5 +1,15 @@
 #include "core_module.h"
+#include "appstate_module.h"
 #include <time.h>
+#include <math.h>
+
+static uint8_t s_relayPin = 0;
+
+static void applyLampToRelay()
+{
+  if (s_relayPin)
+    digitalWrite(s_relayPin, appstate_getLamp() ? LOW : HIGH);  /* Lamp on = LOW. */
+}
 
 static uint16_t computeCurrentDay()
 {
@@ -46,6 +56,15 @@ void core_setup()
   updateTargets();
 }
 
+void core_setRelayPin(uint8_t pin)
+{
+  s_relayPin = pin;
+  if (pin) {
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, HIGH);  /* Relay off. */
+  }
+}
+
 void core_loop()
 {
   /* coreUpdate() is called by main loop with sensor data when those modules are active. */
@@ -76,13 +95,6 @@ bool startProcess(ProcessType type, uint8_t profileId, uint16_t startDay)
   process.currentDay = startDay;
   process.lastTurnEpoch = 0;
 
-  if (profileId == PROFILE_CUSTOM && process.customTurnsPerDay > 0) {
-    stepperSetTurnsPerDay(process.customTurnsPerDay);
-  } else {
-    uint8_t turns = (type == PROCESS_INCUBATION) ? p->incTurnsPerDay : p->holdTurnsPerDay;
-    stepperSetTurnsPerDay(turns);
-  }
-
   updateTargets();
   saveProcessState();
   return true;
@@ -110,11 +122,6 @@ bool transitionProcess()
 
   process.processType = PROCESS_INCUBATION;
 
-  const EggProfileData *p = getProfileById(process.profileId);
-  if (p) {
-    stepperSetTurnsPerDay(p->incTurnsPerDay);
-  }
-
   updateTargets();
   saveProcessState();
   return true;
@@ -122,10 +129,11 @@ bool transitionProcess()
 
 void coreUpdate(const SensorReadings &sensor)
 {
-  (void)sensor;
-
-  if (!process.active)
+  if (!process.active) {
+    appstate_setLamp(false);
+    applyLampToRelay();
     return;
+  }
 
   process.currentDay = computeCurrentDay();
 
@@ -136,18 +144,33 @@ void coreUpdate(const SensorReadings &sensor)
       process.active = false;
       process.processType = PROCESS_NONE;
       saveProcessState();
+      appstate_setLamp(false);
+      applyLampToRelay();
       return;
     }
   }
 
-  if (shouldTurnEggs()) {
-    stepperTurnOnce();
-    markEggsTurned();
-
-    if (isCustomProfileActive() && process.customTurnsPerDay > 0) {
-      stepperSetTurnsPerDay(process.customTurnsPerDay);
-    }
+  /* Decision engine: lamp state from app state (settings, mode, operation) and sensor. */
+  if (process.controlMode != CONTROL_MANAGED) {
+    appstate_setLamp(false);
+    applyLampToRelay();
+    return;
   }
+  float tmin = getActiveTargetMinF();
+  float tmax = getActiveTargetMaxF();
+  float tempF = sensor.tempF;
+  if (isnan(tempF) || isnan(tmin) || isnan(tmax)) {
+    appstate_setLamp(false);
+    applyLampToRelay();
+    return;
+  }
+  bool lampOn = appstate_getLamp();
+  if (tempF < tmin)
+    lampOn = true;
+  else if (tempF >= tmax)
+    lampOn = false;
+  appstate_setLamp(lampOn);
+  applyLampToRelay();
 }
 
 float getActiveTargetMinF()
@@ -200,37 +223,6 @@ float getActiveHumMax()
   return (process.processType == PROCESS_INCUBATION)
            ? p->incHumMax
            : p->holdHumMax;
-}
-
-bool shouldTurnEggs()
-{
-  if (!process.active)
-    return false;
-
-  const EggProfileData *p = getProfileById(process.profileId);
-  if (!p)
-    return false;
-
-  uint8_t turns = 0;
-  if (isCustomProfileActive()) {
-    turns = process.customTurnsPerDay;
-  } else {
-    turns = (process.processType == PROCESS_INCUBATION)
-              ? p->incTurnsPerDay
-              : p->holdTurnsPerDay;
-  }
-
-  if (turns == 0)
-    return false;
-
-  time_t now = time(nullptr);
-  if (now < 100000) return false;
-
-  if (process.lastTurnEpoch == 0)
-    return true;
-
-  uint32_t intervalSec = 86400UL / turns;
-  return (now - process.lastTurnEpoch) >= intervalSec;
 }
 
 void markEggsTurned()

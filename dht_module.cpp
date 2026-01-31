@@ -1,9 +1,27 @@
 #include "dht_module.h"
 #include <DHT.h>
 #include <math.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 static DHT *dht = nullptr;
 static uint8_t dhtPinInternal = 0;
+
+/* Last reading from background task; main loop reads this without blocking. */
+static SensorReadings lastReadings;
+static volatile bool lastReadingsValid = false;
+
+static void dhtTask(void *pvParameters)
+{
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(2050)); /* Read every 2.05s; aligned with core-driven pipeline. */
+    if (dht) {
+      lastReadingsValid = sensorRead(lastReadings);
+    } else {
+      lastReadingsValid = false;
+    }
+  }
+}
 
 /* =========================
    Module lifecycle
@@ -18,11 +36,15 @@ void dht_setup(uint8_t dhtPin)
 
   dht = new DHT(dhtPinInternal, DHT22);
   dht->begin();
+  delay(1);
+
+  lastReadingsValid = false;
+  xTaskCreate(dhtTask, "dht", 2048, NULL, 1, NULL);
 }
 
 void dht_loop()
 {
-  /* No periodic work; reads are done by caller (e.g. core_module). */
+  /* No work in main loop; reads happen in dhtTask. */
 }
 
 /* =========================
@@ -59,6 +81,28 @@ bool sensorRead(SensorReadings &out)
                        : (out.heatIndexF - 32.0f) * 5.0f / 9.0f;
 
   return true;
+}
+
+bool getLastSensorReadings(SensorReadings &out)
+{
+  if (!lastReadingsValid) {
+    sensorReadingsInvalid(out);
+    return false;
+  }
+  out = lastReadings;
+  return true;
+}
+
+void sensorReadingsInvalid(SensorReadings &out)
+{
+  out.tempC = NAN;
+  out.tempF = NAN;
+  out.humidity = NAN;
+  out.absHumidity = NAN;
+  out.dewPointC = NAN;
+  out.dewPointF = NAN;
+  out.heatIndexC = NAN;
+  out.heatIndexF = NAN;
 }
 
 /* =========================

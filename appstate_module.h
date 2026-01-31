@@ -116,10 +116,31 @@ extern EggProfileId currentProfile;
 extern volatile bool otaInProgress;
 
 /* =========================
+   Info section (UI: WiFi, AP SSID, WebSocket, Mode, IPs, MAC)
+   Single source of truth; wifi/ws modules update, frontend reads via WebSocket.
+   ========================= */
+
+void appstate_setApSsid(const char *ssid);
+void appstate_setStaSsid(const char *ssid);
+void appstate_setWifiInfo(bool connected, const char *staIp, const char *apIp, const char *mac);
+void appstate_setWsConnected(bool connected);
+void appstate_setLamp(bool on);
+
+const char *appstate_getApSsid();
+const char *appstate_getStaSsid();
+bool appstate_getWifiConnected();
+const char *appstate_getWifiIp();
+const char *appstate_getApIp();
+const char *appstate_getMac();
+bool appstate_getWsConnected();
+bool appstate_getLamp();
+/* Mode derived from process.controlMode. */
+const char *appstate_getDisplayMode();
+
+/* =========================
    Functions
    ========================= */
 
-void loadProcessState();
 void saveProcessState();
 void resetProcessState();
 bool isCustomProfileActive();

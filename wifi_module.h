@@ -3,8 +3,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
-/* Module lifecycle */
-bool wifi_setup(const char* apSsid, const char* apPassword);
+/* Module lifecycle. STA credentials come from loader (pass NULL if none). */
+bool wifi_setup(const char* apSsid, const char* apPassword, const char* staSsid, const char* staPass);
 void wifi_loop();
 
 IPAddress wifiGetAPIP();

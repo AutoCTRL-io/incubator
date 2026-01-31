@@ -1,5 +1,6 @@
 #include "appstate_module.h"
 #include <Preferences.h>
+#include <string.h>
 
 /* =========================
    Global Runtime State
@@ -44,48 +45,120 @@ EggProfileId currentProfile = PROFILE_CHICKEN;
 // Note: otaInProgress is defined in ota_module.cpp
 
 /* =========================
-   NVS Persistence
+   Info section (UI)
+   ========================= */
+
+#define INFO_AP_SSID_LEN 32
+#define INFO_IP_LEN 16
+#define INFO_MAC_LEN 18
+
+static char info_ap_ssid[INFO_AP_SSID_LEN] = "";
+static char info_sta_ssid[INFO_AP_SSID_LEN] = "";
+static bool info_wifi_connected = false;
+static char info_wifi_ip[INFO_IP_LEN] = "";
+static char info_ap_ip[INFO_IP_LEN] = "";
+static char info_mac[INFO_MAC_LEN] = "";
+static bool info_ws_connected = false;
+static bool info_lamp = false;
+
+void appstate_setApSsid(const char *ssid)
+{
+  if (!ssid) return;
+  strncpy(info_ap_ssid, ssid, INFO_AP_SSID_LEN - 1);
+  info_ap_ssid[INFO_AP_SSID_LEN - 1] = '\0';
+}
+
+void appstate_setStaSsid(const char *ssid)
+{
+  if (!ssid) return;
+  strncpy(info_sta_ssid, ssid, INFO_AP_SSID_LEN - 1);
+  info_sta_ssid[INFO_AP_SSID_LEN - 1] = '\0';
+}
+
+void appstate_setWifiInfo(bool connected, const char *staIp, const char *apIp, const char *mac)
+{
+  info_wifi_connected = connected;
+  if (staIp) {
+    strncpy(info_wifi_ip, staIp, INFO_IP_LEN - 1);
+    info_wifi_ip[INFO_IP_LEN - 1] = '\0';
+  } else {
+    info_wifi_ip[0] = '\0';
+  }
+  if (apIp) {
+    strncpy(info_ap_ip, apIp, INFO_IP_LEN - 1);
+    info_ap_ip[INFO_IP_LEN - 1] = '\0';
+  } else {
+    info_ap_ip[0] = '\0';
+  }
+  if (mac) {
+    strncpy(info_mac, mac, INFO_MAC_LEN - 1);
+    info_mac[INFO_MAC_LEN - 1] = '\0';
+  } else {
+    info_mac[0] = '\0';
+  }
+}
+
+void appstate_setWsConnected(bool connected)
+{
+  info_ws_connected = connected;
+}
+
+void appstate_setLamp(bool on)
+{
+  info_lamp = on;
+}
+
+const char *appstate_getApSsid()
+{
+  return info_ap_ssid;
+}
+
+const char *appstate_getStaSsid()
+{
+  return info_sta_ssid;
+}
+
+bool appstate_getWifiConnected()
+{
+  return info_wifi_connected;
+}
+
+const char *appstate_getWifiIp()
+{
+  return info_wifi_ip;
+}
+
+const char *appstate_getApIp()
+{
+  return info_ap_ip;
+}
+
+const char *appstate_getMac()
+{
+  return info_mac;
+}
+
+bool appstate_getWsConnected()
+{
+  return info_ws_connected;
+}
+
+bool appstate_getLamp()
+{
+  return info_lamp;
+}
+
+const char *appstate_getDisplayMode()
+{
+  return process.controlMode == CONTROL_MANAGED ? "Managed" : "Unmanaged";
+}
+
+/* =========================
+   NVS Persistence (save only; load is done by loader_module)
    ========================= */
 
 static Preferences prefs;
 static const char* NVS_NAMESPACE = "incubator";
-
-void loadProcessState()
-{
-  prefs.begin(NVS_NAMESPACE, true); // read-only
-
-  if (!prefs.getBool("valid", false)) {
-    prefs.end();
-    return; // No saved state
-  }
-
-  process.active = prefs.getBool("active", false);
-  process.controlMode = (ControlMode)prefs.getUChar("controlMode", CONTROL_UNMANAGED);
-  process.processType = (ProcessType)prefs.getUChar("processType", PROCESS_NONE);
-
-  uint8_t loadedProfileId = prefs.getUChar("profileId", PROFILE_CHICKEN);
-  // Validate profileId is within valid range
-  if (loadedProfileId <= PROFILE_CUSTOM) {
-    process.profileId = loadedProfileId;
-  } else {
-    process.profileId = PROFILE_CHICKEN; // Default to Chicken if invalid
-  }
-
-  process.startEpoch = (time_t)prefs.getULong64("startEpoch", 0);
-  process.startDay = prefs.getUShort("startDay", 1);
-  process.currentDay = prefs.getUShort("currentDay", 0);
-
-  process.lastTurnEpoch = (time_t)prefs.getULong64("lastTurnEpoch", 0);
-
-  process.customMinF = prefs.getFloat("customMinF", NAN);
-  process.customMaxF = prefs.getFloat("customMaxF", NAN);
-  process.customHumMin = prefs.getFloat("customHumMin", NAN);
-  process.customHumMax = prefs.getFloat("customHumMax", NAN);
-  process.customTotalDays = prefs.getUShort("customTotalDays", 0);
-  process.customTurnsPerDay = prefs.getUChar("customTurnsPerDay", 0);
-
-  prefs.end();
-}
 
 void saveProcessState()
 {
@@ -154,9 +227,10 @@ bool isProcessRunning()
    Module lifecycle
    ========================= */
 
+/* Establish default values only. Loader runs after this and overwrites from NVS if data exists. */
 void appstate_setup()
 {
-  loadProcessState();
+  /* Defaults already set by static initialization above; no NVS read here. */
 }
 
 void appstate_loop()

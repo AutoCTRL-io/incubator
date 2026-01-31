@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Incubator</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="card">
+  <h1>
+    <span>🥚 Incubator</span>
+    <span class="header-links">
+      <a href="/wifi">Settings</a>
+      <a href="#" onclick="resetDevice(); return false;">Reboot</a>
+    </span>
+  </h1>
+
+  <div class="columns">
+    <div class="col col-left">
+  <!-- System -->
+  <div class="row"><span class="label">WiFi</span><span id="wifi" class="value">—</span></div>
+  <div class="row"><span class="label">AP SSID</span><span id="ap_ssid" class="value">—</span></div>
+  <div class="row"><span class="label">WebSocket</span><span id="ws" class="value">—</span></div>
+  <div class="row"><span class="label">Mode</span><span id="mode" class="value">—</span></div>
+  <div class="row"><span class="label">Wifi IP</span><span id="ip_sta" class="value">—</span></div>
+  <div class="row"><span class="label">AP IP</span><span id="ip_ap" class="value">—</span></div>
+  <div class="row"><span class="label">MAC</span><span id="mac" class="value">—</span></div>
+
+  <div class="row">
+    <span class="label">Profile</span>
+    <select id="profileSelect" style="background:#0d1117;border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:13px;font-weight:600">
+      <option value="0">Chicken</option>
+      <option value="1">Cockatiel</option>
+      <option value="2">Cormorant</option>
+      <option value="3">Crane</option>
+      <option value="4">Duck</option>
+      <option value="5">Duck Muscovy</option>
+      <option value="6">Eagle</option>
+      <option value="7">Emu</option>
+      <option value="8">Falcon</option>
+      <option value="9">Flamingo</option>
+      <option value="10">Goose</option>
+      <option value="11">Grouse</option>
+      <option value="12">Guinea Fowl</option>
+      <option value="13">Hawk</option>
+      <option value="14">Heron</option>
+      <option value="15">Hummingbird</option>
+      <option value="16">Large Parrots</option>
+      <option value="17">Lovebird</option>
+      <option value="18">Ostrich</option>
+      <option value="19">Owl</option>
+      <option value="20">Parakeet</option>
+      <option value="21">Parrots</option>
+      <option value="22">Partridge</option>
+      <option value="23">Peacock</option>
+      <option value="24">Pelican</option>
+      <option value="25">Penguin</option>
+      <option value="26">Pheasant</option>
+      <option value="27">Pigeon</option>
+      <option value="28">Quail</option>
+      <option value="29">Rail</option>
+      <option value="30">Rhea</option>
+      <option value="31">Seabirds</option>
+      <option value="32">Songbirds</option>
+      <option value="33">Stork</option>
+      <option value="34">Swan</option>
+      <option value="35">Toucan</option>
+      <option value="36">Turkey</option>
+      <option value="37">Vulture</option>
+      <option value="38">Custom</option>
+    </select>
+  </div>
+
+  <div id="rangeDisplay" class="row">
+    <span class="label">Target Range</span>
+    <span class="value">
+      <span id="range_min">—</span> – <span id="range_max">—</span> °F
+    </span>
+  </div>
+
+  <div id="customRange" style="display:none">
+    <div class="row" style="padding:4px 0">
+      <span class="label">Min °F</span>
+      <input id="tmin" placeholder="Min °F" style="background:#0d1117;border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:13px;width:120px"/>
+    </div>
+    <div class="row" style="padding:4px 0">
+      <span class="label">Max °F</span>
+      <input id="tmax" placeholder="Max °F" style="background:#0d1117;border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:13px;width:120px"/>
+    </div>
+  </div>
+
+  <!-- Metrics -->
+  <div class="lamp-row">
+    <div class="metric wide" style="flex:1">
+      <div id="lampIcon" class="lampIcon"></div>
+      <div class="lampText">Lamp <span id="lamp">—</span></div>
+    </div>
+  </div>
+  <div class="timer-row">
+    <div id="timerContainer" class="timer-container">
+      <div id="timerRing" class="timer-ring">
+        <div id="timerValue" class="timer-value">2.0</div>
+      </div>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="metric"><span class="label">Temp (°F)</span><span id="temp_f" class="value">—</span></div>
+    <div class="metric"><span class="label">Temp (°C)</span><span id="temp_c" class="value">—</span></div>
+    <div class="metric"><span class="label">Humidity (%)</span><span id="rh" class="value">—</span></div>
+    <div class="metric"><span class="label">Abs Hum (g/m³)</span><span id="ah" class="value">—</span></div>
+    <div class="metric"><span class="label">Dew (°F)</span><span id="dew_f" class="value">—</span></div>
+    <div class="metric"><span class="label">HeatIdx (°F)</span><span id="heat_f" class="value">—</span></div>
+  </div>
+
+  <!-- Peaks -->
+  <div class="mini">
+    <div class="miniTitle">
+      <span class="t">Temperature Peaks</span>
+      <span id="peakTop" class="value">—</span>
+    </div>
+    <div id="peaks" class="peakList"></div>
+  </div>
+    </div>
+    <div class="col col-right">
+      <!-- Empty column, same dimensions as left -->
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast">Saved</div>
+
+<script src="app.js"></script>
+</body>
+</html>
