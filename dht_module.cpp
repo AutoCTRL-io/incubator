@@ -14,7 +14,7 @@ static volatile bool lastReadingsValid = false;
 static void dhtTask(void *pvParameters)
 {
   for (;;) {
-    vTaskDelay(pdMS_TO_TICKS(2050)); /* Read every 2.05s; aligned with core-driven pipeline. */
+    vTaskDelay(pdMS_TO_TICKS(2000)); /* Read every 2s; aligned with core/WS broadcast. */
     if (dht) {
       lastReadingsValid = sensorRead(lastReadings);
     } else {

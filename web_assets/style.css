@@ -53,6 +53,19 @@ h1{
   padding:6px 0;border-bottom:1px solid var(--border)
 }
 .row:last-child{border-bottom:none}
+/* Actions mini: fixed row height so input vs read-only doesn't change layout */
+#manualTargets .row{
+  min-height:32px;
+  box-sizing:border-box;
+}
+#manualTargets .manualTargets-input,
+#manualTargets .row input{
+  height:26px;
+  padding:0 6px;
+  line-height:26px;
+  font-size:13px;
+  box-sizing:border-box;
+}
 .label{color:var(--muted);font-size:13px}
 .value{font-weight:600}
 .grid{
@@ -116,6 +129,36 @@ a{color:var(--accent);text-decoration:none;font-size:13px}
   color:var(--muted);
   font-weight:600;
 }
+.action-buttons{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.btn-action{
+  padding:8px 12px;
+  border-radius:8px;
+  border:1px solid var(--border);
+  background:#0d1117;
+  color:var(--text);
+  font-size:13px;
+  font-weight:600;
+  cursor:pointer;
+}
+.btn-action:hover{
+  background:var(--accent);
+  color:#000;
+  border-color:var(--accent);
+}
+/* Tilt now: small blue link after "Next tilt in" */
+.tiltNowLink{
+  font-size:12px;
+  color:#58a6ff;
+  text-decoration:none;
+  margin-left:6px;
+}
+.tiltNowLink:hover{
+  text-decoration:underline;
+}
 .peakList{
   display:flex;
   flex-direction:column;
@@ -160,8 +203,8 @@ a{color:var(--accent);text-decoration:none;font-size:13px}
 }
 .timer-value{
   position:absolute;
-  top:27%;
-  left:24%;
+  top:28%;
+  left:23.5%;
   font-size:14px;
   font-weight:800;
   font-variant-numeric:tabular-nums;
@@ -186,4 +229,44 @@ a{color:var(--accent);text-decoration:none;font-size:13px}
   justify-content:flex-start;
   align-items:center;
   margin-bottom:10px;
+}
+
+/* Egg Tilting On/Off toggle (Manual mode): rounded, grey when off, lights up when on */
+.toggleWrap{
+  display:inline-flex;
+  align-items:center;
+  cursor:pointer;
+}
+.toggleInput{
+  position:absolute;
+  opacity:0;
+  width:0;
+  height:0;
+}
+.toggleSlider{
+  position:relative;
+  width:44px;
+  height:24px;
+  background:var(--border);
+  border-radius:12px;
+  transition:background .2s, box-shadow .2s;
+}
+.toggleSlider::after{
+  content:'';
+  position:absolute;
+  top:2px;
+  left:2px;
+  width:20px;
+  height:20px;
+  background:var(--muted);
+  border-radius:50%;
+  transition:transform .2s;
+}
+.toggleInput:checked + .toggleSlider{
+  background:var(--ok);
+  box-shadow:0 0 12px rgba(63,185,80,.4);
+}
+.toggleInput:checked + .toggleSlider::after{
+  transform:translateX(20px);
+  background:#fff;
 }

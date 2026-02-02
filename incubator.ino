@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
+#include <WiFi.h>
+#include <time.h>
 #include "appstate_module.h"
 #include "loader_module.h"
 #include "wifi_module.h"
@@ -9,16 +11,19 @@
 #include "ota_module.h"
 #include "profiles_module.h"
 #include "core_module.h"
+#include "turning_module.h"
+#include "stepper_module.h"
 #include "ws_module.h"
 
 WebServer server(80);
 WebSocketsServer ws(81);
 
-/* Pins per excluded/original_code.ino: DHT 4, relay 5. Stepper not in use. */
+/* Pins: DHT 4, lamp 5, humidifier 6. Stepper not in use. */
 #define DHT_PIN 4
-#define RELAY_PIN 5
-/* Core-driven pipeline: temp read -> decision engine -> lamp state -> WebSocket every 2.05s. */
-static const uint32_t SENSOR_BROADCAST_INTERVAL_MS = 2050;
+#define LAMP_PIN 5
+#define HUMIDIFIER_PIN 6
+/* Core-driven pipeline: temp/humidity read -> process -> lamp/humidifier -> WebSocket every 2s. */
+static const uint32_t SENSOR_BROADCAST_INTERVAL_MS = 2000;
 static unsigned long lastSensorBroadcastMs = 0;
 
 /* ===== appstate -> loader -> wifi -> webserver + dht + ota + profiles + core + ws (stepper is stub) ===== */
@@ -42,6 +47,15 @@ void setup()
     Serial.println(wifiGetAPIP());
     Serial.print("WiFi IP: ");
     Serial.println(wifiGetSTAIP());
+    /* Sync time from NTP when STA is connected (device uses UTC; UI shows local time). */
+    if (WiFi.status() == WL_CONNECTED) {
+      configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+      struct tm t;
+      for (int i = 0; i < 15 && !getLocalTime(&t); i++) delay(500);
+      Serial.println(getLocalTime(&t) ? "Time: NTP synced (UTC)" : "Time: NTP pending (use UTC when synced)");
+    } else {
+      Serial.println("Time: no STA, using RTC/boot (UTC when NTP was last synced)");
+    }
   } else {
     Serial.println("WiFi: FAILED");
   }
@@ -61,10 +75,18 @@ void setup()
   ota_setup();
   profiles_setup();
   core_setup();
-  core_setRelayPin(RELAY_PIN);  /* Core drives relay (lamp) directly. */
+  core_setLampPin(LAMP_PIN);
+  core_setHumidifierPin(HUMIDIFIER_PIN);
+  { StepperConfig sc = { 0, 0, 0, 360, false }; stepper_setup(sc); }  /* Stub until real motor. */
+  /* Restore last-turn time from NVS when clock is synced so tilting state survives reboot (with NTP). */
+  {
+    time_t now = time(nullptr);
+    if (now >= 100000 && process.lastTurnEpoch > 0)
+      stepper_setLastTurnEpoch(process.lastTurnEpoch);
+  }
   ws_setup(ws);
 
-  Serial.println("(WiFi IP every 10s; DHT/decision/lamp/WS every 2.05s; OTA enabled)");
+  Serial.println("(WiFi IP every 10s; sensor/core/WS every 2s; OTA enabled)");
   Serial.flush();
 }
 
@@ -76,6 +98,15 @@ void loop()
   profiles_loop();
   dht_loop();
   core_loop();
+  turning_loop();   /* Timer-based; no DHT. Core tells it enabled/interval. */
+  /* On turn: push status immediately so frontend gets new tilt and time-until-next. */
+  if (turning_didTurnLastLoop()) {
+    SensorReadings sr;
+    if (getLastSensorReadings(sr)) {
+      coreUpdate(sr);
+      wsBroadcastStatus(sr);
+    }
+  }
   ws_loop(ws);
 
   unsigned long now = millis();
@@ -83,7 +114,7 @@ void loop()
     lastSensorBroadcastMs = now;
     SensorReadings sr;
     bool valid = getLastSensorReadings(sr);
-    coreUpdate(sr);  /* Decision engine: process state, targets, lamp state; drives relay. */
+    coreUpdate(sr);  /* Orchestrator: phase → climate targets + turning config; climate decides lamp; relay applied here. */
     wsBroadcastStatus(sr);
     if (valid) {
       Serial.print("DHT: ");

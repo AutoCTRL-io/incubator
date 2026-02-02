@@ -61,3 +61,8 @@ void stepperSetTurnsPerDay(uint32_t turns)
 {
   currentTurnsPerDay = turns;
 }
+
+void stepper_setLastTurnEpoch(time_t epoch)
+{
+  lastTurnEpoch = epoch;
+}

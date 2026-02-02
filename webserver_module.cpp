@@ -65,6 +65,8 @@ void webserver_setup(WebServer &server)
   });
 
   /* ===== Upload handler (POST): save each file by field name (index, wifi, style, app) ===== */
+  /* Only open a file when the user actually selected one (non-empty filename); otherwise
+   * we would open with "w" and truncate existing content for empty form fields. */
   server.on("/upload", HTTP_POST,
     [&]() {
       server.send(200, "text/html",
@@ -75,13 +77,17 @@ void webserver_setup(WebServer &server)
       if (upload.status == UPLOAD_FILE_START) {
         if (s_uploadFile)
           s_uploadFile.close();
-        const char *path = nullptr;
-        if (upload.name == "index") path = PATH_INDEX;
-        else if (upload.name == "wifi") path = PATH_WIFI;
-        else if (upload.name == "style") path = PATH_STYLE;
-        else if (upload.name == "app") path = PATH_APP;
-        if (path)
-          s_uploadFile = LittleFS.open(path, "w");
+        s_uploadFile = File();
+        /* Only open if user selected a file for this field (filename non-empty). */
+        if (upload.filename && upload.filename[0] != '\0') {
+          const char *path = nullptr;
+          if (upload.name == "index") path = PATH_INDEX;
+          else if (upload.name == "wifi") path = PATH_WIFI;
+          else if (upload.name == "style") path = PATH_STYLE;
+          else if (upload.name == "app") path = PATH_APP;
+          if (path)
+            s_uploadFile = LittleFS.open(path, "w");
+        }
       } else if (upload.status == UPLOAD_FILE_WRITE && s_uploadFile) {
         s_uploadFile.write(upload.buf, upload.currentSize);
       } else if (upload.status == UPLOAD_FILE_END) {

@@ -1,12 +1,17 @@
 #include "wifi_module.h"
 #include "appstate_module.h"
 #include <Preferences.h>
+#include <esp_wifi.h>
 
 static bool apRunning = false;
 /* Match original_code.ino: credentials saved in namespace "incubator" with keys "ssid" and "pass". */
 static const char* WIFI_NVS_NS = "incubator";
 static const char* K_SSID = "ssid";
 static const char* K_PASS = "pass";
+
+/* Single fixed STA MAC so the device always connects with the same MAC and gets the same IP.
+   Set these 6 bytes to match the MAC you use for your router's static IP reservation. */
+static const uint8_t STA_MAC[6] = { 0x94, 0xA9, 0x90, 0x2E, 0x92, 0xE4 };
 
 /* Print AP/STA IP to serial every 10s so logs stay readable; DHT prints every 2s. */
 static const unsigned long WIFI_LOOP_INTERVAL_MS = 10000;
@@ -35,9 +40,11 @@ bool wifi_setup(const char* apSsid, const char* apPassword, const char* staSsid,
     WiFi.setAutoReconnect(true);
     WiFi.setHostname("Incubator");
     WiFi.mode(WIFI_AP_STA);
+    delay(100);
+    /* Force STA to use the single fixed MAC so the device always gets the same IP from the router. */
+    esp_wifi_set_mac(WIFI_IF_STA, (uint8_t*)STA_MAC);
     Serial.println("WiFi: Mode set to AP+STA (using saved credentials)");
     Serial.flush();
-    delay(100);
 
     bool apOk = WiFi.softAP(apSsid, apPassword);
     if (!apOk) {
@@ -52,6 +59,7 @@ bool wifi_setup(const char* apSsid, const char* apPassword, const char* staSsid,
     Serial.print("WiFi: Connecting to ");
     Serial.print(staSsid);
     Serial.println("...");
+    if (!pass || pass[0] == '\0') Serial.println("WiFi: WARNING - saved password empty (NVS may have been erased by flash); connect to Incubator AP and re-enter WiFi credentials.");
     Serial.flush();
     WiFi.begin(staSsid, pass);
 
@@ -117,6 +125,8 @@ void wifi_loop()
     String apStr = wifiGetAPIP().toString();
     String macStr = WiFi.macAddress();
     appstate_setWifiInfo(connected, staStr.c_str(), apStr.c_str(), macStr.c_str());
+    /* WiFi signal (RSSI) for local STA connection when present. */
+    appstate_setWifiRssi(connected ? (int8_t)WiFi.RSSI() : (int8_t)-128);
   }
 
   unsigned long now = millis();

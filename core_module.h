@@ -7,8 +7,9 @@
 
 void core_setup();
 void core_loop();
-/* Relay drives the lamp; core decides lamp and drives relay directly. Call after core_setup(). */
-void core_setRelayPin(uint8_t pin);
+/* Lamp and humidifier GPIO; core applies climate decisions. Call after core_setup(). */
+void core_setLampPin(uint8_t pin);
+void core_setHumidifierPin(uint8_t pin);
 
 void coreUpdate(const SensorReadings &sensor);
 
@@ -17,7 +18,10 @@ bool startProcess(ProcessType type, uint8_t profileId, uint16_t startDay);
 void cancelProcess();
 bool transitionProcess();
 
-// Target resolution
+// Phase resolution: returns current phase for process; updates process.activePhaseIndex.
+const IncubationPhase *getActivePhase();
+
+// Target resolution (from active phase)
 float getActiveTargetMinF();
 float getActiveTargetMaxF();
 float getActiveHumMin();

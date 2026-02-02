@@ -1,48 +1,50 @@
 # Incubator – Project Status
 
-## Current build: minimal (Serial + WiFi AP + Web)
+## Current build: full pipeline (DHT → core → lamp/humidifier → WebSocket)
 
 **Entry point:** `incubator.ino`  
-**Active modules:** `appstate_module`, `loader_module`, `wifi_module`, `webserver_module`  
-**Startup order:** appstate_setup() (defaults only) → loader_setup() (NVS load, overwrite appstate, store wifi creds) → wifi_setup(..., loader creds) → webserver_setup()  
-**Served:** `/`, `/wifi`, static assets (`/style.css`, `/app.js`)  
-**Not yet in use:** `ota_module`, `core_module`, `dht_module`, `stepper_module`, `ws_module`, `profiles_module`, `webassets_module` (full UI)
+**Active modules:** appstate, loader, wifi, webserver, dht, ota, profiles, core, turning, stepper (stub), ws  
+**Pins:** DHT = GPIO 4, Lamp = GPIO 5, Humidifier = GPIO 6  
 
-## WiFi behavior
+## Sensor and broadcast
 
-- **AP:** Always started; SSID "Incubator", default pass "12345678". AP IP: `192.168.4.1`.
-- **STA:** Only used if NVS has saved credentials (`wifi_module` loads them). If none, mode is AP-only and **WiFi IP (STA) = 0.0.0.0** — this is expected. **WiFi IP is printed every 1 second in `wifi_loop()`** so you can see when/if STA gets an address.
-- "WiFi: SUCCESS" means the **Access Point** started; it does not mean the device connected to your home WiFi as a client.
+- **DHT:** Read every **2 s** in background task (`dht_module`).  
+- **Main loop:** Every **2 s** (`SENSOR_BROADCAST_INTERVAL_MS`): `getLastSensorReadings(sr)` → `coreUpdate(sr)` → `wsBroadcastStatus(sr)`. Lamp and humidifier state are derived from temp/humidity in `climate_module` and applied to GPIO in `core_module`.  
+- **On egg turn:** After `turning_loop()`, if `turning_didTurnLastLoop()`: immediate `coreUpdate(sr)` + `wsBroadcastStatus(sr)` so frontend gets new tilt position and time-until-next.
 
-## OTA
+## WebSocket
 
-- **OTA is not included in the minimal build.** The `ota_module` exists but is not called from `incubator.ino` yet.
+- **Status payload:** `type: "status"` with temp, humidity, lamp, **humidifier**, **tilt_position** (left/center/right), **rotation_enabled**, **motor_seconds_until_next**, motor_last_turn, process/profile/day, targets, etc.  
+- **On client connect:** Send `info` then **status** (from last stored sensor/state) so the page has full state on load.  
+- **On change:** Status is broadcast every 2 s and again when a turn occurs.
 
-## Architecture (full app, for when modules are re-enabled)
+## Lamp and humidifier
 
-- **appstate_module:** Global `process` struct and targets; `appstate_setup()` sets defaults only (no NVS read). `saveProcessState()` still writes. Load is done by loader_module.
-- **loader_module:** Single place that reads NVS (namespace "incubator"). Runs after appstate_setup(); overwrites appstate vars if data exists; retrieves WiFi credentials for wifi_setup. `loader_setup`/`loader_loop`; `loader_getStaSsid`/`loader_getStaPass`.
-- **core_module:** Start/cancel/transition process, day tracking, target resolution, egg-turning logic; `core_setup`/`core_loop`.
-- **stepper_module:** Motor position/phase, `stepperSetTurnsPerDay`; `stepper_setup`/`stepper_loop`.
-- **webserver_module (full):** All API endpoints when restored; currently pages + static only; `webserver_setup`/`webserver_loop`.
-- **ws_module:** WebSockets; motor status in broadcast; `ws_setup`/`ws_loop`.
-- **profiles_module:** 38 egg profiles; `profiles_setup`/`profiles_loop`.
-- **dht_module:** DHT22 temp/humidity; `dht_setup`/`dht_loop`.
-- **wifi_module:** AP/STA; `wifi_setup(apSsid, apPass, staSsid, staPass)` — STA credentials come from loader (no NVS read in wifi). `wifi_loop()` prints AP/STA IP every 1s. `wifiSaveCredentials()` still writes to NVS for next boot.
-- **ota_module:** OTA updates; `ota_setup`/`ota_loop`.
-- **webassets_module:** HTML/CSS/JS blobs; `webassets_setup`/`webassets_loop`.
+- **core_module:** `core_setLampPin(5)`, `core_setHumidifierPin(6)`. No "relay" naming; only lamp and humidifier.  
+- **climate_module:** Lamp on when temp &lt; targetMin, off when temp ≥ targetMax. Humidifier on when humidity &lt; hmin, off when humidity ≥ hmax.  
+- **appstate:** `appstate_setLamp()` / `appstate_setHumidifier()`; both cleared when process inactive or system/control disabled.
 
-## Recent changes
+## Egg turning
 
-- **Loader added:** appstate runs first (defaults only); loader runs second and loads NVS, overwrites appstate, retrieves WiFi credentials; wifi uses loader creds (no NVS read in wifi for creds).
-- All modules use `x_setup()`/`x_loop()`; incubator.ino calls appstate_setup → loader_setup → wifi_setup(loader creds) → webserver_setup.
-- `wifi_loop()` prints AP IP and STA IP every 1 second to serial.
-- Web server reduced to pages + static for minimal test; API handlers removed from this build.
-- Serial log shows AP IP and STA IP; STA = 0.0.0.0 when no saved credentials.
-- OTA not included in minimal build (reverted).
+- **turning_module:** Configured by core from active phase (`turningEnabled`, `turnIntervalHours`). `turning_loop()` runs each main loop; when interval elapsed, calls `stepperTurnOnce()` and `markEggsTurned()`.  
+- **turning_didTurnLastLoop():** Returns true once after a turn (then cleared); main loop uses this to broadcast status immediately.  
+- **Status:** `rotation_enabled`, `tilt_position` (left/center/right from motor phase 0–360° in thirds), `motor_seconds_until_next`, `motor_last_turn`.
 
-## Next steps (when expanding from minimal)
+## Frontend
 
-1. Add UI/API to save WiFi STA credentials (then STA IP will show after reconnect).
-2. Re-enable modules incrementally: appstate_module → core_module → dht_module → stepper_module → ws_module, etc.
-3. Restore full webserver_module API and webassets_module when core is stable.
+- **Right column:** Process, Actions (System On/Off, Profile, Mode), manual targets when Custom, Turn every (hrs), Egg tilting (Rotation On/Off, Tilt, Next tilt in, Last tilt), Temperature Peaks.  
+- **Left column:** Lamp and **Humidifier** state; temp/humidity and other metrics.  
+- **applyStatus():** Handles `humidifier`, `tilt_position`, `rotation_enabled`, and existing status fields. Data is received on load (status sent on WS connect) and on every 2 s + on turn broadcast.
+
+## Recent changes (this session)
+
+- Temp/humidity read and reported every **2 s**; DHT task interval 2000 ms; broadcast interval 2000 ms.  
+- Pins: DHT 4, **Lamp 5**, **Humidifier 6**; `core_setLampPin` / `core_setHumidifierPin` (no relay naming).  
+- Humidifier: appstate getter/setter, climate logic (hmin/hmax), core applies to pin 6 and clears when not managed.  
+- Status includes `humidifier`, `tilt_position` (left/center/right), `rotation_enabled`; frontend shows Humidifier, Rotation, Tilt, Next tilt in, Last tilt.  
+- WS: last status stored in `ws_module`; on connect send info + status; broadcast status on each 2 s tick and when `turning_didTurnLastLoop()`.
+
+## Next steps (optional)
+
+- Process UI: Start day editable when !active; Start/Cancel buttons and locking when active.  
+- Custom profile UI: rotation on/off and "Turn every x hours" per phase.

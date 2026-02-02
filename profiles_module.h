@@ -4,31 +4,20 @@
 #include "appstate_module.h"
 
 /*
-  Egg Profile Data
-  ----------------
+  Egg Profile Data (phase-based)
+  ------------------------------
   Represents biological defaults for a species.
-  These are READ-ONLY presets.
+  READ-ONLY presets; each phase covers a day range with temp, humidity, turning.
 */
 
 struct EggProfileData {
   uint8_t id;
   const char *name;
 
-  // === Incubation ===
-  float incTempMinF;
-  float incTempMaxF;
-  float incHumMin;
-  float incHumMax;
-  uint16_t incTotalDays;
-  uint8_t incTurnsPerDay;
+  uint16_t totalDays;
 
-  // === Holding / Preservation ===
-  float holdTempMinF;
-  float holdTempMaxF;
-  float holdHumMin;
-  float holdHumMax;
-  uint16_t holdMaxDays;
-  uint8_t holdTurnsPerDay;
+  const IncubationPhase *phases;
+  uint8_t phaseCount;
 };
 
 extern const EggProfileData EGG_PROFILES[];

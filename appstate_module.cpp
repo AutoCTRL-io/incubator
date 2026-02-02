@@ -15,17 +15,15 @@ ProcessState process = {
   .profileId = PROFILE_CHICKEN,
 
   .startEpoch = 0,
-  .startDay = 1,
+  .startDay = 0,
   .currentDay = 0,
+
+  .activePhaseIndex = 0,
 
   .lastTurnEpoch = 0,
 
-  .customMinF = NAN,
-  .customMaxF = NAN,
-  .customHumMin = NAN,
-  .customHumMax = NAN,
-  .customTotalDays = 0,
-  .customTurnsPerDay = 0
+  .customPhases = { { 0 } },
+  .customPhaseCount = 0
 };
 
 /* =========================
@@ -55,11 +53,16 @@ EggProfileId currentProfile = PROFILE_CHICKEN;
 static char info_ap_ssid[INFO_AP_SSID_LEN] = "";
 static char info_sta_ssid[INFO_AP_SSID_LEN] = "";
 static bool info_wifi_connected = false;
+static int8_t info_wifi_rssi = -128;  /* dBm when STA connected; -128 when not. */
 static char info_wifi_ip[INFO_IP_LEN] = "";
 static char info_ap_ip[INFO_IP_LEN] = "";
 static char info_mac[INFO_MAC_LEN] = "";
 static bool info_ws_connected = false;
 static bool info_lamp = false;
+static bool info_humidifier = false;
+bool info_system_enabled = true;  /* When false: sensors still read, no lamp/output. Exposed in header for inline getter. */
+static bool manual_rotation_enabled = false;
+static uint16_t manual_turn_interval_hours = 2;  /* Default 2h when Manual turning is enabled. */
 
 void appstate_setApSsid(const char *ssid)
 {
@@ -98,6 +101,11 @@ void appstate_setWifiInfo(bool connected, const char *staIp, const char *apIp, c
   }
 }
 
+void appstate_setWifiRssi(int8_t rssi)
+{
+  info_wifi_rssi = rssi;
+}
+
 void appstate_setWsConnected(bool connected)
 {
   info_ws_connected = connected;
@@ -106,6 +114,32 @@ void appstate_setWsConnected(bool connected)
 void appstate_setLamp(bool on)
 {
   info_lamp = on;
+}
+
+void appstate_setHumidifier(bool on)
+{
+  info_humidifier = on;
+}
+
+void appstate_setSystemEnabled(bool on)
+{
+  info_system_enabled = on;
+}
+
+void appstate_setManualTurning(bool enabled, uint16_t intervalHours)
+{
+  manual_rotation_enabled = enabled;
+  manual_turn_interval_hours = (intervalHours > 0 && intervalHours <= 24) ? intervalHours : 2;
+}
+
+bool appstate_getManualTurningEnabled()
+{
+  return manual_rotation_enabled;
+}
+
+uint16_t appstate_getManualTurnIntervalHours()
+{
+  return manual_turn_interval_hours;
 }
 
 const char *appstate_getApSsid()
@@ -121,6 +155,11 @@ const char *appstate_getStaSsid()
 bool appstate_getWifiConnected()
 {
   return info_wifi_connected;
+}
+
+int appstate_getWifiRssi()
+{
+  return (int)info_wifi_rssi;
 }
 
 const char *appstate_getWifiIp()
@@ -148,6 +187,11 @@ bool appstate_getLamp()
   return info_lamp;
 }
 
+bool appstate_getHumidifier()
+{
+  return info_humidifier;
+}
+
 const char *appstate_getDisplayMode()
 {
   return process.controlMode == CONTROL_MANAGED ? "Managed" : "Unmanaged";
@@ -165,6 +209,7 @@ void saveProcessState()
   prefs.begin(NVS_NAMESPACE, false); // read-write
 
   prefs.putBool("valid", true);
+  prefs.putBool("systemEnabled", info_system_enabled);
 
   prefs.putBool("active", process.active);
   prefs.putUChar("controlMode", (uint8_t)process.controlMode);
@@ -177,14 +222,23 @@ void saveProcessState()
 
   prefs.putULong64("lastTurnEpoch", (uint64_t)process.lastTurnEpoch);
 
-  prefs.putFloat("customMinF", process.customMinF);
-  prefs.putFloat("customMaxF", process.customMaxF);
-  prefs.putFloat("customHumMin", process.customHumMin);
-  prefs.putFloat("customHumMax", process.customHumMax);
-  prefs.putUShort("customTotalDays", process.customTotalDays);
-  prefs.putUChar("customTurnsPerDay", process.customTurnsPerDay);
+  prefs.putUChar("activePhaseIndex", process.activePhaseIndex);
+  prefs.putUChar("customPhaseCount", process.customPhaseCount);
+  prefs.putBytes("customPhases", &process.customPhases[0], sizeof(process.customPhases));
+
+  prefs.putBool("manualRotationEnabled", manual_rotation_enabled);
+  prefs.putUShort("manualTurnIntervalHours", manual_turn_interval_hours);
 
   prefs.end();
+}
+
+/* Custom phases edited via UI later; no-op for now. */
+void appstate_setManualTargets(float tmin, float tmax, float hmin, float hmax)
+{
+  (void)tmin;
+  (void)tmax;
+  (void)hmin;
+  (void)hmax;
 }
 
 /* =========================
@@ -199,16 +253,13 @@ void resetProcessState()
   process.profileId = PROFILE_CHICKEN;
 
   process.startEpoch = 0;
-  process.startDay = 1;
+  process.startDay = 0;
   process.currentDay = 0;
+  process.activePhaseIndex = 0;
   process.lastTurnEpoch = 0;
 
-  process.customMinF = NAN;
-  process.customMaxF = NAN;
-  process.customHumMin = NAN;
-  process.customHumMax = NAN;
-  process.customTotalDays = 0;
-  process.customTurnsPerDay = 0;
+  memset(&process.customPhases[0], 0, sizeof(process.customPhases));
+  process.customPhaseCount = 0;
 
   saveProcessState();
 }

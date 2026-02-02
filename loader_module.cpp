@@ -50,17 +50,21 @@ void loader_setup()
     }
 
     process.startEpoch = (time_t)prefs.getULong64("startEpoch", 0);
-    process.startDay = prefs.getUShort("startDay", 1);
+    process.startDay = prefs.getUShort("startDay", 0);
     process.currentDay = prefs.getUShort("currentDay", 0);
+    process.activePhaseIndex = prefs.getUChar("activePhaseIndex", 0);
     process.lastTurnEpoch = (time_t)prefs.getULong64("lastTurnEpoch", 0);
 
-    process.customMinF = prefs.getFloat("customMinF", NAN);
-    process.customMaxF = prefs.getFloat("customMaxF", NAN);
-    process.customHumMin = prefs.getFloat("customHumMin", NAN);
-    process.customHumMax = prefs.getFloat("customHumMax", NAN);
-    process.customTotalDays = prefs.getUShort("customTotalDays", 0);
-    process.customTurnsPerDay = prefs.getUChar("customTurnsPerDay", 0);
+    process.customPhaseCount = prefs.getUChar("customPhaseCount", 0);
+    size_t phaseBytes = sizeof(process.customPhases);
+    if (prefs.getBytesLength("customPhases") == (size_t)phaseBytes)
+      prefs.getBytes("customPhases", &process.customPhases[0], phaseBytes);
   }
+
+  appstate_setSystemEnabled(prefs.getBool("systemEnabled", true));
+  appstate_setManualTurning(
+    prefs.getBool("manualRotationEnabled", false),
+    (uint16_t)prefs.getUShort("manualTurnIntervalHours", 2));
 
   prefs.end();
 

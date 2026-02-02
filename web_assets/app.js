@@ -1,13 +1,13 @@
 const el = id => document.getElementById(id);
 
 const uiState = {
-  editingMin: false,
-  editingMax: false,
   tmin: null,
   tmax: null,
+  manualEditingTemp: false,
+  manualEditingHum: false,
 };
 
-let toast, tminEl, tmaxEl;
+let toast;
 let ws = null;
 let timer = 2.0;
 let timerAnimationFrameId = null;
@@ -15,9 +15,24 @@ let timerLastUpdateTime = null;
 let timerRing = null;
 let timerValue = null;
 
+/* When true, next status will prefill manual temp/humidity/turn-every (e.g. after profile change). */
+let pendingProfilePrefill = false;
+/* 1s debounce timers for Manual fields: save after 1s of no input. */
+let manualFieldsDebounceTimer = null;
+let turnIntervalDebounceTimer = null;
+
 function showToast(){
-  toast.classList.add('show');
-  setTimeout(()=>toast.classList.remove('show'),1000);
+  if(toast) { toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'),1000); }
+}
+
+/* Send a command over WebSocket. All settings use WS, not HTTP. */
+function sendWsCommand(obj){
+  if(!ws || ws.readyState !== WebSocket.OPEN){
+    if(toast) { toast.textContent = 'Not connected'; showToast(); }
+    return;
+  }
+  ws.send(JSON.stringify(obj));
+  showToast();
 }
 
 function fmt(v,d=2){
@@ -92,6 +107,12 @@ function applyStatus(s){
     }else{
       wifiEl.innerHTML = '— <span style="color:var(--bad)">✗</span>';
     }
+  }
+  const wifiRssiEl = el('wifi_rssi');
+  if(wifiRssiEl){
+    const rssi = s.wifi_rssi;
+    if(s.wifi_connected === true && rssi != null && rssi > -128) wifiRssiEl.textContent = rssi + ' dBm';
+    else wifiRssiEl.textContent = '—';
   }
   const modeEl = el('mode');
   if(modeEl) modeEl.textContent = s.mode || '—';
@@ -176,15 +197,13 @@ function applyStatus(s){
   const lampIconEl = el('lampIcon');
   if(lampIconEl) lampIconEl.classList.toggle('on', lampOn);
 
-  const isCustom = (s.profile_id === 38);
+  const humidifierEl = el('humidifier');
+  if(humidifierEl) humidifierEl.textContent = (s.humidifier === true) ? 'ON' : 'OFF';
 
   const profileSelectEl = el('profileSelect');
-  // Only update profile dropdown if user hasn't manually selected Custom
-  // This prevents WebSocket updates from overwriting user's Custom selection
-  if(profileSelectEl && profileSelectEl.dataset.userSelected !== 'true' && profileSelectEl.value != String(s.profile_id)) {
+  if(profileSelectEl && profileSelectEl.dataset.userSelected !== 'true' && s.profile_id <= 37 && profileSelectEl.value != String(s.profile_id)) {
     profileSelectEl.value = String(s.profile_id);
   }
-  // Reset the flag if the backend profile matches what user selected
   if(profileSelectEl && profileSelectEl.dataset.userSelected === 'true' && String(s.profile_id) === profileSelectEl.value){
     delete profileSelectEl.dataset.userSelected;
   }
@@ -194,20 +213,111 @@ function applyStatus(s){
   const rangeMaxEl = el('range_max');
   if(rangeMaxEl) rangeMaxEl.textContent = fmt(s.tmax,1);
 
-  const customRangeEl = el('customRange');
-  if(customRangeEl) customRangeEl.style.display = isCustom ? 'block' : 'none';
-  const rangeDisplayEl = el('rangeDisplay');
-  if(rangeDisplayEl){
-    rangeDisplayEl.style.display = isCustom ? 'none' : 'flex';
-  }
-
   uiState.tmin = s.tmin;
   uiState.tmax = s.tmax;
 
-  if(isCustom && tminEl && tmaxEl){
-    if(!uiState.editingMin) tminEl.value = fmt(s.tmin,1);
-    if(!uiState.editingMax) tmaxEl.value = fmt(s.tmax,1);
+  // Mode (shown in Actions dropdown only; not repeated in Overview)
+  const effectiveMode = (!s.active || s.process_type === 0) ? 0 : s.process_type;
+  const modeSelectEl = el('modeSelect');
+  if(modeSelectEl && modeSelectEl.dataset.userSelected !== 'true') modeSelectEl.value = String(effectiveMode);
+  if(modeSelectEl && modeSelectEl.dataset.userSelected === 'true' && String(effectiveMode) === modeSelectEl.value) delete modeSelectEl.dataset.userSelected;
+
+  // System On/Off: when Off, sensors still read but no lamp/output
+  const systemEnableSelectEl = el('systemEnableSelect');
+  if(systemEnableSelectEl && systemEnableSelectEl.dataset.userSelected !== 'true') systemEnableSelectEl.value = (s.system_enabled === false ? '0' : '1');
+  if(systemEnableSelectEl && systemEnableSelectEl.dataset.userSelected === 'true' && String(s.system_enabled === false ? 0 : 1) === systemEnableSelectEl.value) delete systemEnableSelectEl.dataset.userSelected;
+
+  // Temp target & Humidity target: editable when Mode is Manual, read-only when preset profile
+  const isManualMode = (effectiveMode === 0);
+  const profileTempDisplayEl = el('profile_temp_display');
+  const manualTempInputsEl = el('manual_temp_inputs');
+  const profileHumidityDisplayEl = el('profile_humidity_display');
+  const manualHumidityInputsEl = el('manual_humidity_inputs');
+  if(profileTempDisplayEl) profileTempDisplayEl.style.display = isManualMode ? 'none' : 'inline';
+  if(manualTempInputsEl) manualTempInputsEl.style.display = isManualMode ? 'inline' : 'none';
+  if(profileHumidityDisplayEl) profileHumidityDisplayEl.style.display = isManualMode ? 'none' : 'inline';
+  if(manualHumidityInputsEl) manualHumidityInputsEl.style.display = isManualMode ? 'inline' : 'none';
+  if(isManualMode){
+    /* In Manual, only update these fields when user just selected a profile; never overwrite from periodic status. */
+    if(pendingProfilePrefill){
+      const manualTminEl = el('manual_tmin');
+      const manualTmaxEl = el('manual_tmax');
+      const manualHminEl = el('manual_hmin');
+      const manualHmaxEl = el('manual_hmax');
+      if(manualTminEl && s.tmin != null) manualTminEl.value = fmt(s.tmin,1);
+      if(manualTmaxEl && s.tmax != null) manualTmaxEl.value = fmt(s.tmax,1);
+      if(manualHminEl && s.hmin != null) manualHminEl.value = fmt(s.hmin,0);
+      if(manualHmaxEl && s.hmax != null) manualHmaxEl.value = fmt(s.hmax,0);
+      const turnEl = el('turn_interval_hours_input');
+      if(turnEl){
+        const hrs = s.turn_interval_hours != null && s.turn_interval_hours > 0
+          ? s.turn_interval_hours
+          : (s.motor_turns_per_day != null && s.motor_turns_per_day > 0 ? 24 / s.motor_turns_per_day : null);
+        turnEl.value = hrs != null ? (Number(hrs) === Math.round(hrs) ? String(Math.round(hrs)) : Number(hrs).toFixed(2)) : '';
+      }
+      pendingProfilePrefill = false;
+    } else {
+      /* When Manual: fill empty fields from profile default (status) so first load shows selected profile's Turn every (hrs), etc. */
+      const manualTminEl = el('manual_tmin');
+      const manualTmaxEl = el('manual_tmax');
+      const manualHminEl = el('manual_hmin');
+      const manualHmaxEl = el('manual_hmax');
+      const turnEl = el('turn_interval_hours_input');
+      if(manualTminEl && manualTminEl.value === '' && s.tmin != null) manualTminEl.value = fmt(s.tmin,1);
+      if(manualTmaxEl && manualTmaxEl.value === '' && s.tmax != null) manualTmaxEl.value = fmt(s.tmax,1);
+      if(manualHminEl && manualHminEl.value === '' && s.hmin != null) manualHminEl.value = fmt(s.hmin,0);
+      if(manualHmaxEl && manualHmaxEl.value === '' && s.hmax != null) manualHmaxEl.value = fmt(s.hmax,0);
+      if(turnEl && turnEl.value === ''){
+        const hrs = s.turn_interval_hours != null && s.turn_interval_hours > 0
+          ? s.turn_interval_hours
+          : (s.motor_turns_per_day != null && s.motor_turns_per_day > 0 ? 24 / s.motor_turns_per_day : null);
+        if(hrs != null) turnEl.value = Number(hrs) === Math.round(hrs) ? String(Math.round(hrs)) : Number(hrs).toFixed(2);
+      }
+    }
+  } else {
+    if(profileTempDisplayEl) profileTempDisplayEl.textContent = (s.tmin != null && s.tmax != null) ? `${fmt(s.tmin,1)} – ${fmt(s.tmax,1)} °F` : '—';
+    if(profileHumidityDisplayEl) profileHumidityDisplayEl.textContent = (s.hmin != null && s.hmax != null) ? `${fmt(s.hmin,0)} – ${fmt(s.hmax,0)} %` : '—';
   }
+
+  const processDayEl = el('process_day');
+  if(processDayEl) processDayEl.textContent = s.day != null && s.day !== undefined ? String(s.day) : '—';
+
+  // Egg Tilting: Turn every (hrs), next tilt in, last tilt
+  // Turn every (hrs): input when Mode is Manual; otherwise read-only from backend
+  const turnIntervalHoursInputEl = el('turn_interval_hours_input');
+  const turnIntervalHoursDisplayEl = el('turn_interval_hours_display');
+  const showTurnIntervalInput = (effectiveMode === 0);
+  if(turnIntervalHoursInputEl) turnIntervalHoursInputEl.style.display = showTurnIntervalInput ? '' : 'none';
+  if(turnIntervalHoursDisplayEl) turnIntervalHoursDisplayEl.style.display = showTurnIntervalInput ? 'none' : '';
+  if(!showTurnIntervalInput && turnIntervalHoursDisplayEl){
+    const hrs = s.turn_interval_hours != null && s.turn_interval_hours > 0
+      ? s.turn_interval_hours
+      : (s.motor_turns_per_day != null && s.motor_turns_per_day > 0 ? 24 / s.motor_turns_per_day : null);
+    turnIntervalHoursDisplayEl.textContent = hrs != null ? (Number(hrs) === Math.round(hrs) ? String(Math.round(hrs)) : Number(hrs).toFixed(2)) : '—';
+  }
+  // In Manual when tilting is on, always show the backend interval in the Turn every (hrs) box
+  if(showTurnIntervalInput && turnIntervalHoursInputEl && s.rotation_enabled){
+    const hrs = s.turn_interval_hours != null && s.turn_interval_hours > 0
+      ? s.turn_interval_hours
+      : (s.motor_turns_per_day != null && s.motor_turns_per_day > 0 ? 24 / s.motor_turns_per_day : null);
+    if(hrs != null) turnIntervalHoursInputEl.value = Number(hrs) === Math.round(hrs) ? String(Math.round(hrs)) : Number(hrs).toFixed(2);
+  }
+  // Egg Tilting On/Off toggle: visible when Manual (use dropdown value so it shows as soon as user selects Manual)
+  const eggTiltingToggleWrap = el('egg_tilting_toggle_wrap');
+  const eggTiltingSwitch = el('egg_tilting_switch');
+  const isManualFromDropdown = modeSelectEl && modeSelectEl.value === '0';
+  if(eggTiltingToggleWrap) eggTiltingToggleWrap.style.display = isManualFromDropdown ? 'inline-flex' : 'none';
+  if(eggTiltingSwitch && isManualFromDropdown) eggTiltingSwitch.checked = !!s.rotation_enabled;
+
+  const motorNextEl = el('motor_seconds_until_next');
+  if(motorNextEl){
+    const sec = s.motor_seconds_until_next;
+    if(sec == null || sec === undefined) motorNextEl.textContent = '—';
+    else if(sec < 60) motorNextEl.textContent = sec + ' s';
+    else motorNextEl.textContent = Math.round(sec / 60) + ' min';
+  }
+  const motorLastEl = el('motor_last_turn');
+  if(motorLastEl) motorLastEl.textContent = s.motor_last_turn ? fmtWhen(s.motor_last_turn) : '—';
 
   renderPeaks(s.temp_peaks || []);
 
@@ -215,17 +325,49 @@ function applyStatus(s){
   resetTimer();
 }
 
-function saveCustomRange(){
-  if(uiState.tmin == null || uiState.tmax == null) return;
-  fetch('/api/profile',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      profile_id:6,
-      tmin:uiState.tmin,
-      tmax:uiState.tmax
-    })
-  }).then(showToast);
+function saveManualTargets(){
+  const manualTminEl = el('manual_tmin');
+  const manualTmaxEl = el('manual_tmax');
+  const manualHminEl = el('manual_hmin');
+  const manualHmaxEl = el('manual_hmax');
+  if(!manualTminEl || !manualTmaxEl || !manualHminEl || !manualHmaxEl) return;
+  const tmin = parseFloat(manualTminEl.value);
+  const tmax = parseFloat(manualTmaxEl.value);
+  const hmin = parseFloat(manualHminEl.value);
+  const hmax = parseFloat(manualHmaxEl.value);
+  if(Number.isNaN(tmin) || Number.isNaN(tmax) || Number.isNaN(hmin) || Number.isNaN(hmax)) return;
+  sendWsCommand({ type: 'set_manual_targets', tmin, tmax, hmin, hmax });
+}
+
+// Prefill temp, humidity, and Turn every (hrs) from status (e.g. when switching to Manual or when profile is selected).
+function prefillManualFieldsFromStatus(s){
+  if(!s) return;
+  const manualTminEl = el('manual_tmin');
+  const manualTmaxEl = el('manual_tmax');
+  const manualHminEl = el('manual_hmin');
+  const manualHmaxEl = el('manual_hmax');
+  const turnIntervalHoursInputEl = el('turn_interval_hours_input');
+  if(manualTminEl && s.tmin != null) manualTminEl.value = fmt(s.tmin,1);
+  if(manualTmaxEl && s.tmax != null) manualTmaxEl.value = fmt(s.tmax,1);
+  if(manualHminEl && s.hmin != null) manualHminEl.value = fmt(s.hmin,0);
+  if(manualHmaxEl && s.hmax != null) manualHmaxEl.value = fmt(s.hmax,0);
+  if(turnIntervalHoursInputEl){
+    const hrs = s.turn_interval_hours != null && s.turn_interval_hours > 0
+      ? s.turn_interval_hours
+      : (s.motor_turns_per_day != null && s.motor_turns_per_day > 0 ? 24 / s.motor_turns_per_day : null);
+    turnIntervalHoursInputEl.value = hrs != null ? (Number(hrs) === Math.round(hrs) ? String(Math.round(hrs)) : Number(hrs).toFixed(2)) : '';
+  }
+}
+
+// Saves egg turning schedule: UI is "turn every X hours"; backend expects turns_per_day (24/hours).
+function saveTurningSchedule(){
+  const turnIntervalHoursInputEl = el('turn_interval_hours_input');
+  if(!turnIntervalHoursInputEl) return;
+  const hours = parseFloat(turnIntervalHoursInputEl.value);
+  if(Number.isNaN(hours) || hours <= 0 || hours > 24) return;
+  const turnsPerDay = Math.round(24 / hours);
+  const clamped = Math.max(1, Math.min(24, turnsPerDay)); // backend caps at 24
+  sendWsCommand({ type: 'set_turning', turns_per_day: clamped });
 }
 
 function updateTimerVisual(progress){
@@ -310,7 +452,7 @@ function resetTimer(){
 
 function resetDevice(){
   if(confirm('This will reboot the device')){
-    fetch('/api/reset',{method:'POST'});
+    sendWsCommand({ type: 'reset' });
   }
 }
 
@@ -361,69 +503,115 @@ function saveProfile(){
   const profileSelectEl = el('profileSelect');
   if(!profileSelectEl) return;
 
-  const profileId = parseInt(profileSelectEl.value);
-  const isCustom = (profileId === 38);
+  const profileId = parseInt(profileSelectEl.value, 10);
+  if(profileId < 0 || profileId > 37) return;
 
-  // Update UI immediately when Custom is selected
-  const customRangeEl = el('customRange');
-  const rangeDisplayEl = el('rangeDisplay');
-  if(customRangeEl) customRangeEl.style.display = isCustom ? 'block' : 'none';
-  if(rangeDisplayEl) rangeDisplayEl.style.display = isCustom ? 'none' : 'flex';
-
-  // Immediately save to backend to prevent WebSocket from overwriting
-  let body = { profile_id: profileId };
-
-  if(isCustom && tminEl && tmaxEl){
-    const tmin = parseFloat(tminEl.value);
-    const tmax = parseFloat(tmaxEl.value);
-    if(!isNaN(tmin) && !isNaN(tmax)){
-      body.tmin = tmin;
-      body.tmax = tmax;
-    }else{
-      // If Custom selected but no values yet, use current values from status
-      body.tmin = uiState.tmin || 98.0;
-      body.tmax = uiState.tmax || 100.5;
-    }
-  }
-
-  fetch('/api/profile',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(body)
-  }).then(() => {
-    showToast();
-    // Mark that we've saved, so WebSocket updates don't overwrite
-    profileSelectEl.dataset.userSelected = 'true';
-  });
+  sendWsCommand({ type: 'set_profile', profile_id: profileId });
+  profileSelectEl.dataset.userSelected = 'true';
+  /* Next status will prefill manual temp/humidity/turn every (when Manual); applyStatus uses pendingProfilePrefill. */
+  pendingProfilePrefill = true;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   toast = el('toast');
-  tminEl = el('tmin');
-  tmaxEl = el('tmax');
   timerRing = el('timerRing');
   timerValue = el('timerValue');
 
   const profileSelectEl = el('profileSelect');
   if(profileSelectEl) profileSelectEl.onchange = saveProfile;
 
-  if(tminEl) tminEl.onfocus = () => uiState.editingMin = true;
-  if(tmaxEl) tmaxEl.onfocus = () => uiState.editingMax = true;
-
-  if(tminEl) tminEl.onblur = () => {
-    uiState.editingMin = false;
-    uiState.tmin = parseFloat(tminEl.value);
-    saveCustomRange();
-  };
-
-  if(tmaxEl) tmaxEl.onblur = () => {
-    uiState.editingMax = false;
-    uiState.tmax = parseFloat(tmaxEl.value);
-    saveCustomRange();
-  };
-
   // Initialize timer
   resetTimer();
+
+  // System On/Off: when Off, no lamp/output (sensors still read)
+  const systemEnableSelectEl = el('systemEnableSelect');
+  if(systemEnableSelectEl) systemEnableSelectEl.onchange = () => {
+    const v = systemEnableSelectEl.value;
+    systemEnableSelectEl.dataset.userSelected = 'true';
+    sendWsCommand({ type: 'set_system', enabled: v === '1' });
+  };
+
+  // Mode dropdown (Manual / Egg Holding / Incubation): process state after Profile is chosen
+  const modeSelectEl = el('modeSelect');
+  if(modeSelectEl) modeSelectEl.onchange = () => {
+    modeSelectEl.dataset.userSelected = 'true';
+    const mode = parseInt(modeSelectEl.value, 10);
+    sendWsCommand({ type: 'set_mode', mode });
+    // When switching to Manual, prefill temp/humidity/turn every from current (selected profile) status so user can tweak
+    if(mode === 0) prefillManualFieldsFromStatus(window._lastStatus);
+    // Show/hide Egg Tilting toggle immediately when Mode changes (Manual = show)
+    const eggTiltingToggleWrap = el('egg_tilting_toggle_wrap');
+    if(eggTiltingToggleWrap) eggTiltingToggleWrap.style.display = (mode === 0) ? 'inline-flex' : 'none';
+  };
+
+  // Temp/Humidity target visibility: editable when Mode is Manual, read-only when preset profile
+  const profileTempDisplayEl = el('profile_temp_display');
+  const manualTempInputsEl = el('manual_temp_inputs');
+  const profileHumidityDisplayEl = el('profile_humidity_display');
+  const manualHumidityInputsEl = el('manual_humidity_inputs');
+  function updateTargetVisibility(){
+    const modeSelectEl = el('modeSelect');
+    const isManual = modeSelectEl && modeSelectEl.value === '0';
+    if(profileTempDisplayEl) profileTempDisplayEl.style.display = isManual ? 'none' : 'inline';
+    if(manualTempInputsEl) manualTempInputsEl.style.display = isManual ? 'inline' : 'none';
+    if(profileHumidityDisplayEl) profileHumidityDisplayEl.style.display = isManual ? 'none' : 'inline';
+    if(manualHumidityInputsEl) manualHumidityInputsEl.style.display = isManual ? 'inline' : 'none';
+    const eggTiltingToggleWrap = el('egg_tilting_toggle_wrap');
+    if(eggTiltingToggleWrap) eggTiltingToggleWrap.style.display = isManual ? 'inline-flex' : 'none';
+  }
+  updateTargetVisibility();
+  if(profileSelectEl) profileSelectEl.addEventListener('change', updateTargetVisibility);
+  const modeSelectElForVisibility = el('modeSelect');
+  if(modeSelectElForVisibility) modeSelectElForVisibility.addEventListener('change', updateTargetVisibility);
+
+  // Egg Tilting toggle: sync visibility from Mode dropdown on load (so Manual default shows before first status)
+  const eggTiltingToggleWrapInit = el('egg_tilting_toggle_wrap');
+  const modeSelectInit = el('modeSelect');
+  if(eggTiltingToggleWrapInit && modeSelectInit) eggTiltingToggleWrapInit.style.display = modeSelectInit.value === '0' ? 'inline-flex' : 'none';
+
+  // Tilt now: link after "Next tilt in" – triggers one tilt; schedule continues every X hrs from that point
+  const tiltNowLink = el('tilt_now_link');
+  if(tiltNowLink) tiltNowLink.addEventListener('click', (e) => { e.preventDefault(); sendWsCommand({ type: 'tilt_now' }); });
+
+  // Manual temp/humidity: 1s debounced save on input; save immediately on blur (cancel debounce)
+  const manualTminEl = el('manual_tmin');
+  const manualTmaxEl = el('manual_tmax');
+  const manualHminEl = el('manual_hmin');
+  const manualHmaxEl = el('manual_hmax');
+  function scheduleManualTargetsSave(){
+    if(manualFieldsDebounceTimer) clearTimeout(manualFieldsDebounceTimer);
+    manualFieldsDebounceTimer = setTimeout(() => { saveManualTargets(); manualFieldsDebounceTimer = null; }, 1000);
+  }
+  function flushManualTargetsSave(){
+    if(manualFieldsDebounceTimer){ clearTimeout(manualFieldsDebounceTimer); manualFieldsDebounceTimer = null; }
+    saveManualTargets();
+  }
+  if(manualTminEl){ manualTminEl.addEventListener('input', scheduleManualTargetsSave); manualTminEl.onblur = flushManualTargetsSave; }
+  if(manualTmaxEl){ manualTmaxEl.addEventListener('input', scheduleManualTargetsSave); manualTmaxEl.onblur = flushManualTargetsSave; }
+  if(manualHminEl){ manualHminEl.addEventListener('input', scheduleManualTargetsSave); manualHminEl.onblur = flushManualTargetsSave; }
+  if(manualHmaxEl){ manualHmaxEl.addEventListener('input', scheduleManualTargetsSave); manualHmaxEl.onblur = flushManualTargetsSave; }
+
+  // Turn every (hrs): 1s debounced save on input; save immediately on blur (cancel debounce)
+  const turnIntervalHoursInputEl = el('turn_interval_hours_input');
+  function scheduleTurnIntervalSave(){
+    if(turnIntervalDebounceTimer) clearTimeout(turnIntervalDebounceTimer);
+    turnIntervalDebounceTimer = setTimeout(() => { saveTurningSchedule(); turnIntervalDebounceTimer = null; }, 1000);
+  }
+  function flushTurnIntervalSave(){
+    if(turnIntervalDebounceTimer){ clearTimeout(turnIntervalDebounceTimer); turnIntervalDebounceTimer = null; }
+    saveTurningSchedule();
+  }
+  if(turnIntervalHoursInputEl){ turnIntervalHoursInputEl.addEventListener('input', scheduleTurnIntervalSave); turnIntervalHoursInputEl.onblur = flushTurnIntervalSave; }
+
+  // Egg Tilting On/Off toggle (Manual only): send set_turning when toggled
+  const eggTiltingSwitch = el('egg_tilting_switch');
+  if(eggTiltingSwitch) eggTiltingSwitch.addEventListener('change', () => {
+    const enabled = eggTiltingSwitch.checked;
+    const turnEl = el('turn_interval_hours_input');
+    const hours = turnEl ? parseFloat(turnEl.value) : NaN;
+    const turnsPerDay = (!Number.isNaN(hours) && hours > 0 && hours <= 24) ? Math.max(1, Math.min(24, Math.round(24 / hours))) : 12;
+    sendWsCommand({ type: 'set_turning', enabled, turns_per_day: enabled ? turnsPerDay : 0 });
+  });
 
   connectWebSocket();
 });

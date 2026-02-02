@@ -39,3 +39,5 @@ void stepperEnable(bool enable);
 void stepperTurnOnce();
 MotorStatus stepperGetStatus();
 void stepperSetTurnsPerDay(uint32_t turns);
+/** Restore last-turn time from NVS at boot when clock is synced (so state survives reboot with NTP). */
+void stepper_setLastTurnEpoch(time_t epoch);
