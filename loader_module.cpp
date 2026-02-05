@@ -18,7 +18,7 @@ void loader_setup()
   loadedStaPass = prefs.getString("pass", "");
   /* keepap not used by wifi_module yet; can be read here if needed later */
 
-  /* ---- Target overrides (original_code.ino keys) ---- */
+  /* ---- Target overrides (manual ranges; also prime appstate for resolveCurrentTargets) ---- */
   if (prefs.isKey("tmin") && prefs.isKey("tmax")) {
     targetMinF = prefs.getFloat("tmin", targetMinF);
     targetMaxF = prefs.getFloat("tmax", targetMaxF);
@@ -27,6 +27,7 @@ void loader_setup()
     targetHMin = prefs.getFloat("hmin", targetHMin);
     targetHMax = prefs.getFloat("hmax", targetHMax);
   }
+  appstate_setManualTargets(targetMinF, targetMaxF, targetHMin, targetHMax);
 
   /* ---- Profile (original_code.ino key) ---- */
   if (prefs.isKey("profile")) {

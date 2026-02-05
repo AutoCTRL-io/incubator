@@ -78,23 +78,21 @@ static void wsHandleText(uint8_t *payload, size_t length)
     saveProcessState();
   } else if (strcmp(cmd, "set_mode") == 0) {
     int v = doc["mode"] | 0;
-    if (v == 0) {
+    if (v == 0)
       cancelProcess();
-    } else if (v == 1) {
-      uint16_t startDay = doc["start_day"] | process.startDay;
-      startProcess(PROCESS_EGG_HOLDING, process.profileId, startDay);
-    } else if (v == 2) {
-      uint16_t startDay = doc["start_day"] | process.startDay;
-      startProcess(PROCESS_INCUBATION, process.profileId, startDay);
-    }
+    /* Mode 1 (Egg Holding) and 2 (Incubation) are selection only; Start button sends start_process. */
   } else if (strcmp(cmd, "start_process") == 0) {
-    if (process.active) return;
     int mode = doc["mode"] | 1;
+    /* Allow when idle, or when switching from Egg Holding to Incubation (Start Incubation link). */
+    if (process.active && !(process.processType == PROCESS_EGG_HOLDING && mode == 2))
+      return;
+    int profileId = doc["profile_id"] | (int)process.profileId;
+    if (profileId < 0 || profileId > (int)PROFILE_CUSTOM) profileId = (int)process.profileId;
     uint16_t startDay = doc["start_day"] | process.startDay;
     if (mode == 1)
-      startProcess(PROCESS_EGG_HOLDING, process.profileId, startDay);
+      startProcess(PROCESS_EGG_HOLDING, (uint8_t)profileId, startDay);
     else if (mode == 2)
-      startProcess(PROCESS_INCUBATION, process.profileId, startDay);
+      startProcess(PROCESS_INCUBATION, (uint8_t)profileId, startDay);
   } else if (strcmp(cmd, "set_start_day") == 0) {
     if (!process.active) {
       process.startDay = doc["start_day"] | 0;
@@ -126,22 +124,22 @@ static void wsHandleText(uint8_t *payload, size_t length)
     saveProcessState();
     /* Push status immediately so UI gets confirmation (rotation_enabled / turn_interval_hours). */
     if (lastSensorReadingsValid)
-      wsBroadcastStatus(lastSensorReadings);
+      wsBroadcastStatus(lastSensorReadings, true);
   } else if (strcmp(cmd, "tilt_now") == 0) {
     /* Manual tilt: trigger one turn and update last-turn time; broadcast so UI updates. */
     turning_tiltNow();
     if (lastSensorReadingsValid)
-      wsBroadcastStatus(lastSensorReadings);
+      wsBroadcastStatus(lastSensorReadings, true);
   } else if (strcmp(cmd, "reset") == 0) {
     ESP.restart();
   }
 }
 
-/* Map motor phase (0–360 degrees) to tilt position: left, center, right (thirds). */
+/* Map motor phase (0–360 degrees) to tilt position: left (tilted), flat (level), right (tilted). */
 static const char *tiltPositionFromPhase(float phase)
 {
   if (phase < 120.0f) return "left";
-  if (phase < 240.0f) return "center";
+  if (phase < 240.0f) return "flat";
   return "right";
 }
 
@@ -229,17 +227,21 @@ void ws_loop(WebSocketsServer &ws)
   ws.loop();
 }
 
-void wsBroadcastStatus(const SensorReadings &sensor)
+void wsBroadcastStatus(const SensorReadings &sensor, bool sensorValid)
 {
   if (!wsPtr) return;
 
-  lastSensorReadings = sensor;
-  lastSensorReadingsValid = true;
+  if (sensorValid) {
+    lastSensorReadings = sensor;
+    lastSensorReadingsValid = true;
+  }
+  /* When sensor invalid, use last good so UI and lamp/humidifier state stay unchanged. */
 
   wsBroadcastInfoIfChanged();
 
+  const SensorReadings &toSend = (sensorValid || !lastSensorReadingsValid) ? sensor : lastSensorReadings;
   StaticJsonDocument<1024> doc;
-  buildStatusDoc(doc, sensor);
+  buildStatusDoc(doc, toSend);
 
   char buf[1024];
   size_t len = serializeJson(doc, buf);

@@ -22,6 +22,9 @@ WebSocketsServer ws(81);
 #define DHT_PIN 4
 #define LAMP_PIN 5
 #define HUMIDIFIER_PIN 6
+/* Alarm outputs (active HIGH). Adjust these to the GPIOs you wire to your alarm indicators. */
+#define TEMP_ALARM_PIN 7
+#define HUMIDITY_ALARM_PIN 8
 /* Core-driven pipeline: temp/humidity read -> process -> lamp/humidifier -> WebSocket every 2s. */
 static const uint32_t SENSOR_BROADCAST_INTERVAL_MS = 2000;
 static unsigned long lastSensorBroadcastMs = 0;
@@ -77,6 +80,8 @@ void setup()
   core_setup();
   core_setLampPin(LAMP_PIN);
   core_setHumidifierPin(HUMIDIFIER_PIN);
+  core_setTempAlarmPin(TEMP_ALARM_PIN);
+  core_setHumidityAlarmPin(HUMIDITY_ALARM_PIN);
   { StepperConfig sc = { 0, 0, 0, 360, false }; stepper_setup(sc); }  /* Stub until real motor. */
   /* Restore last-turn time from NVS when clock is synced so tilting state survives reboot (with NTP). */
   {
@@ -93,8 +98,13 @@ void setup()
 void loop()
 {
   wifi_loop();
-  webserver_loop(server);
   ota_loop();
+  /* During OTA upload, skip all other work to avoid watchdog, heap pressure, and WiFi contention. */
+  if (otaInProgress) {
+    delay(1);
+    return;
+  }
+  webserver_loop(server);
   profiles_loop();
   dht_loop();
   core_loop();
@@ -102,10 +112,10 @@ void loop()
   /* On turn: push status immediately so frontend gets new tilt and time-until-next. */
   if (turning_didTurnLastLoop()) {
     SensorReadings sr;
-    if (getLastSensorReadings(sr)) {
+    bool valid = getLastSensorReadings(sr);
+    if (valid)
       coreUpdate(sr);
-      wsBroadcastStatus(sr);
-    }
+    wsBroadcastStatus(sr, valid);
   }
   ws_loop(ws);
 
@@ -114,8 +124,9 @@ void loop()
     lastSensorBroadcastMs = now;
     SensorReadings sr;
     bool valid = getLastSensorReadings(sr);
-    coreUpdate(sr);  /* Orchestrator: phase → climate targets + turning config; climate decides lamp; relay applied here. */
-    wsBroadcastStatus(sr);
+    if (valid)
+      coreUpdate(sr);  /* Only update lamp/humidifier when sensor read succeeded. */
+    wsBroadcastStatus(sr, valid);
     if (valid) {
       Serial.print("DHT: ");
       Serial.print(sr.tempF);

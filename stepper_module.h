@@ -39,5 +39,7 @@ void stepperEnable(bool enable);
 void stepperTurnOnce();
 MotorStatus stepperGetStatus();
 void stepperSetTurnsPerDay(uint32_t turns);
+/** Move platform to level (flat) position. Call when tilting is turned off so the platform does not stay tilted. */
+void stepperGoToFlat();
 /** Restore last-turn time from NVS at boot when clock is synced (so state survives reboot with NTP). */
 void stepper_setLastTurnEpoch(time_t epoch);

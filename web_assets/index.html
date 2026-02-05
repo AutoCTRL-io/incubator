@@ -35,14 +35,8 @@
       <div class="lampText">Lamp <span id="lamp">—</span></div>
     </div>
     <div class="metric wide" style="flex:1">
+      <div id="humidifierIcon" class="humidifierIcon"></div>
       <div class="lampText">Humidifier <span id="humidifier">—</span></div>
-    </div>
-  </div>
-  <div class="timer-row">
-    <div id="timerContainer" class="timer-container">
-      <div id="timerRing" class="timer-ring">
-        <div id="timerValue" class="timer-value">2.0</div>
-      </div>
     </div>
   </div>
   <div class="grid">
@@ -52,25 +46,31 @@
     <div class="metric"><span class="label">Abs Hum (g/m³)</span><span id="ah" class="value">—</span></div>
     <div class="metric"><span class="label">Dew (°F)</span><span id="dew_f" class="value">—</span></div>
     <div class="metric"><span class="label">HeatIdx (°F)</span><span id="heat_f" class="value">—</span></div>
+    <div class="metric"><span class="label">Last tilt</span><span id="motor_last_turn" class="value">—</span></div>
+    <div id="tilt_now_tile" class="metric metric-clickable metric-button" data-tooltip="Press to Tilt Now">
+      <span class="label">Next tilt</span>
+      <span id="motor_seconds_until_next" class="value">—</span>
+    </div>
   </div>
     </div>
     <div class="col col-right">
-      <!-- Actions: System On/Off (above Mode); when Off, sensors still read but no lamp/output -->
+      <!-- Actions: Mode first, then Profile (or Preload when Manual); Start/Stop in Overview -->
       <div class="mini">
         <div class="miniTitle">
           <span class="t">Actions</span>
         </div>
         <div class="row">
-          <span class="label">System</span>
-          <select id="systemEnableSelect" style="background:#0d1117;border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:13px;font-weight:600">
-            <option value="1">On</option>
-            <option value="0">Off</option>
+          <span class="label">Mode</span>
+          <select id="modeSelect" style="background:#0d1117;border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:13px;font-weight:600">
+            <option value="0">Manual</option>
+            <option value="1">Egg Holding</option>
+            <option value="2">Incubation</option>
           </select>
         </div>
-        <!-- Profile (preset); then Mode (Manual / Egg Holding / Incubation) -->
         <div class="row">
-          <span class="label">Profile</span>
+          <span class="label" id="profile_label">Profile</span>
           <select id="profileSelect" style="background:#0d1117;border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:13px;font-weight:600">
+            <option value="">—</option>
             <option value="0">Chicken</option>
             <option value="1">Cockatiel</option>
             <option value="2">Cormorant</option>
@@ -111,14 +111,6 @@
             <option value="37">Vulture</option>
           </select>
         </div>
-        <div class="row">
-          <span class="label">Mode</span>
-          <select id="modeSelect" style="background:#0d1117;border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:13px;font-weight:600">
-            <option value="0">Manual</option>
-            <option value="1">Egg Holding</option>
-            <option value="2">Incubation</option>
-          </select>
-        </div>
         <!-- Temp target & Humidity target: editable when Mode is Manual, read-only when preset profile -->
         <div id="manualTargets">
           <div class="row" style="padding:4px 0">
@@ -150,26 +142,32 @@
               <span id="turn_interval_hours_display" class="value" style="display:none">—</span>
             </span>
           </div>
+          <div class="row" style="padding:4px 0">
+            <span class="label">Egg Tilting</span>
+            <span class="value">
+              <label id="egg_tilting_toggle_wrap" class="toggleWrap" style="display:none" title="Egg tilting on/off">
+                <input type="checkbox" id="egg_tilting_switch" class="toggleInput" />
+                <span class="toggleSlider"></span>
+              </label>
+            </span>
+          </div>
         </div>
       </div>
-      <!-- Egg Tilting: next tilt in, last tilt; when Manual, On/Off toggle on header line -->
-      <div class="mini">
-        <div class="miniTitle">
-          <span class="t">Egg Tilting</span>
-          <label id="egg_tilting_toggle_wrap" class="toggleWrap" style="display:none" title="Egg tilting on/off">
-            <input type="checkbox" id="egg_tilting_switch" class="toggleInput" />
-            <span class="toggleSlider"></span>
-          </label>
-        </div>
-        <div class="row"><span class="label">Next tilt in <a id="tilt_now_link" class="tiltNowLink" href="#">tilt now</a></span><span id="motor_seconds_until_next" class="value">—</span></div>
-        <div class="row"><span class="label">Last tilt</span><span id="motor_last_turn" class="value">—</span></div>
-      </div>
-      <!-- Overview: current day only -->
+      <!-- Overview: Day, Start, Stop; communication timer indicator to the right of header -->
       <div class="mini">
         <div class="miniTitle">
           <span class="t">Overview</span>
+          <div id="timerContainer" class="timer-container timer-indicator">
+            <div id="timerRing" class="timer-ring">
+              <div id="timerValue" class="timer-value">2.0</div>
+            </div>
+          </div>
         </div>
         <div class="row"><span class="label">Day</span><span id="process_day" class="value">—</span></div>
+        <div class="row overview-buttons">
+          <button type="button" id="start_stop_btn" class="btn-action btn-start-stop start-state">Start</button>
+          <button type="button" id="start_incubation_btn" class="btn-action btn-start-incubation" style="display:none">Start Incubation</button>
+        </div>
       </div>
       <!-- Temperature Peaks (moved from left column) -->
       <div class="mini">
@@ -184,6 +182,7 @@
 </div>
 
 <div id="toast" class="toast">Saved</div>
+<div id="mouseTooltip" class="mouse-tooltip"></div>
 
 <script src="app.js"></script>
 </body>

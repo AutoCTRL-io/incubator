@@ -10,6 +10,9 @@ void core_loop();
 /* Lamp and humidifier GPIO; core applies climate decisions. Call after core_setup(). */
 void core_setLampPin(uint8_t pin);
 void core_setHumidifierPin(uint8_t pin);
+/* Alarm GPIOs. When configured (non-zero), core asserts alarms when readings are out of target range. */
+void core_setTempAlarmPin(uint8_t pin);
+void core_setHumidityAlarmPin(uint8_t pin);
 
 void coreUpdate(const SensorReadings &sensor);
 

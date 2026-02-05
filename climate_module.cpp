@@ -1,6 +1,7 @@
 /*
-  Climate control: temp/humidity vs targets → lamp (and later humidifier) state.
-  Core tells us the targets; we only see sensor data and targets. No appstate.
+  Climate control: ranges + sensor data → lamp and humidifier state.
+  Mode-agnostic: receives (tmin, tmax, hmin, hmax) and sensor; no knowledge of manual vs phase.
+  Core resolves where ranges come from and feeds them here; this module just goes.
 */
 
 #include "climate_module.h"
@@ -24,12 +25,11 @@ void climate_setTargets(float tempMinF, float tempMaxF, float humMin, float humM
 
 void climate_update(const SensorReadings &sensor)
 {
+  /* When sensor read failed (NaN), do not change lamp or humidifier; leave as last known state. */
   float tempF = sensor.tempF;
-  if (isnan(tempF) || isnan(s_tempMinF) || isnan(s_tempMaxF)) {
-    s_lampOn = false;
-    s_humidifierOn = false;
+  if (isnan(tempF) || isnan(s_tempMinF) || isnan(s_tempMaxF))
     return;
-  }
+
   if (tempF < s_tempMinF)
     s_lampOn = true;
   else if (tempF >= s_tempMaxF)
@@ -43,9 +43,8 @@ void climate_update(const SensorReadings &sensor)
       s_humidifierOn = true;
     else if (rh >= s_humMax)
       s_humidifierOn = false;
-  } else {
-    s_humidifierOn = false;
   }
+  /* else leave humidifier unchanged (sensor invalid or targets invalid) */
 }
 
 bool climate_getLampOn()

@@ -62,6 +62,14 @@ void stepperSetTurnsPerDay(uint32_t turns)
   currentTurnsPerDay = turns;
 }
 
+void stepperGoToFlat()
+{
+  if (!initialized || config.stepsPerTurn == 0) return;
+  /* Set position so phase = 180° (center = flat/level). Real hardware would drive motor to this position. */
+  uint32_t fullTurns = absolutePosition / config.stepsPerTurn;
+  absolutePosition = fullTurns * config.stepsPerTurn + (config.stepsPerTurn / 2);
+}
+
 void stepper_setLastTurnEpoch(time_t epoch)
 {
   lastTurnEpoch = epoch;

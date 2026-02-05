@@ -40,6 +40,11 @@ function fmt(v,d=2){
   return Number(v).toFixed(d);
 }
 
+/* True if value is a valid number for display; use to keep last good when DHT fails. */
+function isValidSensorValue(v){
+  return v != null && v !== undefined && !Number.isNaN(v);
+}
+
 function pad2(n){return String(n).padStart(2,'0');}
 
 function fmtWhen(ts){
@@ -55,8 +60,10 @@ function fmtWhen(ts){
 
 function renderPeaks(list){
   const host = el('peaks');
+  const peakTopEl = el('peakTop');
+  if(!host) return;
   host.innerHTML = '';
-  el('peakTop').textContent = '—';
+  if(peakTopEl) peakTopEl.textContent = '—';
 
   if(!Array.isArray(list) || !list.length){
     host.innerHTML =
@@ -71,8 +78,8 @@ function renderPeaks(list){
       highestPeak = p;
     }
   }
-  if(highestPeak && highestPeak.temp_f != null){
-    el('peakTop').textContent = `${fmt(highestPeak.temp_f,1)}°F`;
+  if(peakTopEl && highestPeak && highestPeak.temp_f != null){
+    peakTopEl.textContent = `${fmt(highestPeak.temp_f,1)}°F`;
   }
 
   // Display each time window peak
@@ -91,6 +98,7 @@ function renderPeaks(list){
 
 function applyStatus(s){
   if(!s) return;
+  try {
 
   const wsEl = el('ws');
   if(wsEl){
@@ -125,71 +133,73 @@ function applyStatus(s){
   const macEl = el('mac');
   if(macEl) macEl.textContent = s.mac || '—';
 
-  // Temperature color coding
+  // Temperature color coding; only update when valid so last good persists on DHT fail
   const tempFEl = el('temp_f');
   if(tempFEl){
-    tempFEl.textContent = fmt(s.temp_f);
-    if(s.temp_f == null || s.temp_f === undefined || Number.isNaN(s.temp_f)){
-      tempFEl.style.color = 'var(--text)'; // Default color for invalid
-    }else if(s.temp_alarm === true){
+    if(isValidSensorValue(s.temp_f)){
+      tempFEl.textContent = fmt(s.temp_f);
+      if(s.temp_alarm === true){
       tempFEl.style.color = 'var(--bad)'; // Red - out of range by >0.5°F
-    }else if(s.temp_f < s.tmin || s.temp_f > s.tmax){
-      tempFEl.style.color = '#ffaa00'; // Yellow - out of target range but within alarm threshold
-    }else{
-      tempFEl.style.color = 'var(--ok)'; // Green - in range
+      }else if(s.temp_f < s.tmin || s.temp_f > s.tmax){
+        tempFEl.style.color = '#ffaa00'; // Yellow - out of target range but within alarm threshold
+      }else{
+        tempFEl.style.color = 'var(--ok)'; // Green - in range
+      }
     }
   }
   const tempCEl = el('temp_c');
   if(tempCEl){
-    tempCEl.textContent = fmt(s.temp_c);
-    if(s.temp_c == null || s.temp_c === undefined || Number.isNaN(s.temp_c)){
-      tempCEl.style.color = 'var(--text)'; // Default color for invalid
-    }else if(s.temp_alarm === true){
+    if(isValidSensorValue(s.temp_c)){
+      tempCEl.textContent = fmt(s.temp_c);
+      if(s.temp_alarm === true){
       tempCEl.style.color = 'var(--bad)'; // Red - out of range by >0.5°F
-    }else{
-      const tminC = (s.tmin - 32) * 5 / 9;
-      const tmaxC = (s.tmax - 32) * 5 / 9;
-      if(s.temp_c < tminC || s.temp_c > tmaxC){
-        tempCEl.style.color = '#ffaa00'; // Yellow - out of target range but within alarm threshold
       }else{
-        tempCEl.style.color = 'var(--ok)'; // Green - in range
+        const tminC = (s.tmin - 32) * 5 / 9;
+        const tmaxC = (s.tmax - 32) * 5 / 9;
+        if(s.temp_c < tminC || s.temp_c > tmaxC){
+          tempCEl.style.color = '#ffaa00'; // Yellow - out of target range but within alarm threshold
+        }else{
+          tempCEl.style.color = 'var(--ok)'; // Green - in range
+        }
       }
     }
   }
 
-  // Humidity color coding
+  // Humidity color coding; only update when valid so last good persists on DHT fail
   const rhEl = el('rh');
   if(rhEl){
-    rhEl.textContent = fmt(s.rh,1);
-    if(s.rh == null || s.rh === undefined || Number.isNaN(s.rh)){
-      rhEl.style.color = 'var(--text)'; // Default color for invalid
-    }else if(s.humidity_alarm === true){
+    if(isValidSensorValue(s.rh)){
+      rhEl.textContent = fmt(s.rh,1);
+      if(s.humidity_alarm === true){
       rhEl.style.color = 'var(--bad)'; // Red - out of range by >5%
-    }else if(s.rh < s.hmin || s.rh > s.hmax){
-      rhEl.style.color = '#ffaa00'; // Yellow - out of target range but within alarm threshold
-    }else{
-      rhEl.style.color = 'var(--ok)'; // Green - in range
+      }else if(s.rh < s.hmin || s.rh > s.hmax){
+        rhEl.style.color = '#ffaa00'; // Yellow - out of target range but within alarm threshold
+      }else{
+        rhEl.style.color = 'var(--ok)'; // Green - in range
+      }
     }
   }
   const ahEl = el('ah');
-  if(ahEl) ahEl.textContent = fmt(s.ah);
-  // Dew point color coding - RED when reached (temp equals or below dew point = condensation)
+  if(ahEl && isValidSensorValue(s.ah)) ahEl.textContent = fmt(s.ah);
+  // Dew point color coding - RED when reached; only update when valid so last good persists on DHT fail
   const dewFEl = el('dew_f');
   if(dewFEl){
-    dewFEl.textContent = fmt(s.dew_f);
-    if(s.dew_f != null && s.temp_f != null && !Number.isNaN(s.dew_f) && !Number.isNaN(s.temp_f)){
+    if(isValidSensorValue(s.dew_f)){
+      dewFEl.textContent = fmt(s.dew_f);
+      if(s.temp_f != null && !Number.isNaN(s.temp_f)){
       // Check if current temp is at or below dew point (within 0.1°F tolerance for floating point)
       if(s.temp_f <= (s.dew_f + 0.1)){
         dewFEl.style.color = 'var(--bad)'; // Red when dew point reached (condensation occurring)
       }else{
         dewFEl.style.color = 'var(--text)'; // Normal color
       }
-    }else{
-      dewFEl.style.color = 'var(--text)'; // Default color for invalid
+      }else{
+        dewFEl.style.color = 'var(--text)'; // Default color for invalid
+      }
     }
   }
   const heatFEl = el('heat_f');
-  if(heatFEl) heatFEl.textContent = fmt(s.heat_f);
+  if(heatFEl && isValidSensorValue(s.heat_f)) heatFEl.textContent = fmt(s.heat_f);
 
   const lampOn = !!s.lamp;
   const lampEl = el('lamp');
@@ -197,15 +207,39 @@ function applyStatus(s){
   const lampIconEl = el('lampIcon');
   if(lampIconEl) lampIconEl.classList.toggle('on', lampOn);
 
+  const humidifierOn = !!s.humidifier;
   const humidifierEl = el('humidifier');
-  if(humidifierEl) humidifierEl.textContent = (s.humidifier === true) ? 'ON' : 'OFF';
+  if(humidifierEl) humidifierEl.textContent = humidifierOn ? 'ON' : 'OFF';
+  const humidifierIconEl = el('humidifierIcon');
+  if(humidifierIconEl) humidifierIconEl.classList.toggle('on', humidifierOn);
 
   const profileSelectEl = el('profileSelect');
-  if(profileSelectEl && profileSelectEl.dataset.userSelected !== 'true' && s.profile_id <= 37 && profileSelectEl.value != String(s.profile_id)) {
+  /* Only sync from status when backend has a valid profile (0–37); empty option stays if user selected it. */
+  if(profileSelectEl && profileSelectEl.dataset.userSelected !== 'true' && s.profile_id >= 0 && s.profile_id <= 37 && profileSelectEl.value != String(s.profile_id)) {
     profileSelectEl.value = String(s.profile_id);
   }
   if(profileSelectEl && profileSelectEl.dataset.userSelected === 'true' && String(s.profile_id) === profileSelectEl.value){
     delete profileSelectEl.dataset.userSelected;
+  }
+  /* When empty profile selected: clear presets in UI, egg tilting off, Start disabled. */
+  const profileIsEmpty = profileSelectEl && profileSelectEl.value === '';
+  if(profileIsEmpty){
+    const manualTminEl = el('manual_tmin');
+    const manualTmaxEl = el('manual_tmax');
+    const manualHminEl = el('manual_hmin');
+    const manualHmaxEl = el('manual_hmax');
+    const turnIntervalHoursInputEl = el('turn_interval_hours_input');
+    const profileTempDisp = el('profile_temp_display');
+    const profileHumDisp = el('profile_humidity_display');
+    if(manualTminEl) manualTminEl.value = '';
+    if(manualTmaxEl) manualTmaxEl.value = '';
+    if(manualHminEl) manualHminEl.value = '';
+    if(manualHmaxEl) manualHmaxEl.value = '';
+    if(turnIntervalHoursInputEl) turnIntervalHoursInputEl.value = '';
+    if(profileTempDisp) profileTempDisp.textContent = '—';
+    if(profileHumDisp) profileHumDisp.textContent = '—';
+    const eggTiltingSwitchEl = el('egg_tilting_switch');
+    if(eggTiltingSwitchEl) eggTiltingSwitchEl.checked = false;
   }
 
   const rangeMinEl = el('range_min');
@@ -222,10 +256,9 @@ function applyStatus(s){
   if(modeSelectEl && modeSelectEl.dataset.userSelected !== 'true') modeSelectEl.value = String(effectiveMode);
   if(modeSelectEl && modeSelectEl.dataset.userSelected === 'true' && String(effectiveMode) === modeSelectEl.value) delete modeSelectEl.dataset.userSelected;
 
-  // System On/Off: when Off, sensors still read but no lamp/output
-  const systemEnableSelectEl = el('systemEnableSelect');
-  if(systemEnableSelectEl && systemEnableSelectEl.dataset.userSelected !== 'true') systemEnableSelectEl.value = (s.system_enabled === false ? '0' : '1');
-  if(systemEnableSelectEl && systemEnableSelectEl.dataset.userSelected === 'true' && String(s.system_enabled === false ? 0 : 1) === systemEnableSelectEl.value) delete systemEnableSelectEl.dataset.userSelected;
+  // Profile label: "Preload" when Manual (template for temp/humidity/turn), "Profile" when Egg Holding/Incubation
+  const profileLabelEl = el('profile_label');
+  if(profileLabelEl) profileLabelEl.textContent = effectiveMode === 0 ? 'Preload' : 'Profile';
 
   // Temp target & Humidity target: editable when Mode is Manual, read-only when preset profile
   const isManualMode = (effectiveMode === 0);
@@ -256,8 +289,8 @@ function applyStatus(s){
         turnEl.value = hrs != null ? (Number(hrs) === Math.round(hrs) ? String(Math.round(hrs)) : Number(hrs).toFixed(2)) : '';
       }
       pendingProfilePrefill = false;
-    } else {
-      /* When Manual: fill empty fields from profile default (status) so first load shows selected profile's Turn every (hrs), etc. */
+    } else if(!profileIsEmpty){
+      /* When Manual and a profile is selected: fill empty fields from profile default (status) so first load shows selected profile's Turn every (hrs), etc. */
       const manualTminEl = el('manual_tmin');
       const manualTmaxEl = el('manual_tmax');
       const manualHminEl = el('manual_hmin');
@@ -281,6 +314,9 @@ function applyStatus(s){
 
   const processDayEl = el('process_day');
   if(processDayEl) processDayEl.textContent = s.day != null && s.day !== undefined ? String(s.day) : '—';
+  /* Start Incubation button: only when Egg Holding is active (process_type 1). */
+  const startIncubationBtn = el('start_incubation_btn');
+  if(startIncubationBtn) startIncubationBtn.style.display = (s.active && s.process_type === 1) ? '' : 'none';
 
   // Egg Tilting: Turn every (hrs), next tilt in, last tilt
   // Turn every (hrs): input when Mode is Manual; otherwise read-only from backend
@@ -319,10 +355,39 @@ function applyStatus(s){
   const motorLastEl = el('motor_last_turn');
   if(motorLastEl) motorLastEl.textContent = s.motor_last_turn ? fmtWhen(s.motor_last_turn) : '—';
 
+  // When stopped: lock temp/humidity/turn every/egg tilting; Profile and Mode stay editable for next run. When running: lock Profile and Mode; temp/humidity/turn/toggle editable.
+  const running = !!s.active;
+  if(profileSelectEl) profileSelectEl.disabled = running;
+  if(modeSelectEl) modeSelectEl.disabled = running;
+  const manualTminElLock = el('manual_tmin');
+  const manualTmaxElLock = el('manual_tmax');
+  const manualHminElLock = el('manual_hmin');
+  const manualHmaxElLock = el('manual_hmax');
+  const turnIntervalInputLock = el('turn_interval_hours_input');
+  const eggTiltingSwitchLock = el('egg_tilting_switch');
+  if(manualTminElLock) manualTminElLock.disabled = !running;
+  if(manualTmaxElLock) manualTmaxElLock.disabled = !running;
+  if(manualHminElLock) manualHminElLock.disabled = !running;
+  if(manualHmaxElLock) manualHmaxElLock.disabled = !running;
+  if(turnIntervalInputLock) turnIntervalInputLock.disabled = !running;
+  if(eggTiltingSwitchLock) eggTiltingSwitchLock.disabled = !running;
+  const startStopBtn = el('start_stop_btn');
+  if(startStopBtn){
+    startStopBtn.textContent = running ? 'Stop' : 'Start';
+    startStopBtn.classList.remove('start-state', 'stop-state');
+    startStopBtn.classList.add(running ? 'stop-state' : 'start-state');
+    /* When no profile selected (empty), disable Start so user must pick a profile to start. */
+    startStopBtn.disabled = !running && !!profileIsEmpty;
+  }
+
   renderPeaks(s.temp_peaks || []);
 
   // Reset timer on data arrival
   resetTimer();
+
+  } catch(err) {
+    console.error('applyStatus error:', err);
+  }
 }
 
 function saveManualTargets(){
@@ -489,7 +554,7 @@ function connectWebSocket(){
           applyStatus(Object.assign({}, data, window._lastInfo || {}));
         }
       } catch(err) {
-        console.error('Failed to parse WebSocket message:', err, e.data);
+        console.error('WebSocket message error:', err, e.data);
       }
     };
   } catch(err) {
@@ -503,13 +568,41 @@ function saveProfile(){
   const profileSelectEl = el('profileSelect');
   if(!profileSelectEl) return;
 
-  const profileId = parseInt(profileSelectEl.value, 10);
+  const rawValue = profileSelectEl.value;
+  if(rawValue === ''){
+    /* Empty option: clear all presets in UI, turn egg tilting off, keep Start disabled. */
+    profileSelectEl.dataset.userSelected = 'true';
+    const manualTminEl = el('manual_tmin');
+    const manualTmaxEl = el('manual_tmax');
+    const manualHminEl = el('manual_hmin');
+    const manualHmaxEl = el('manual_hmax');
+    const turnIntervalHoursInputEl = el('turn_interval_hours_input');
+    if(manualTminEl) manualTminEl.value = '';
+    if(manualTmaxEl) manualTmaxEl.value = '';
+    if(manualHminEl) manualHminEl.value = '';
+    if(manualHmaxEl) manualHmaxEl.value = '';
+    if(turnIntervalHoursInputEl) turnIntervalHoursInputEl.value = '';
+    const profileTempDisp = el('profile_temp_display');
+    const profileHumDisp = el('profile_humidity_display');
+    if(profileTempDisp) profileTempDisp.textContent = '—';
+    if(profileHumDisp) profileHumDisp.textContent = '—';
+    const eggTiltingSwitchEl = el('egg_tilting_switch');
+    if(eggTiltingSwitchEl) eggTiltingSwitchEl.checked = false;
+    sendWsCommand({ type: 'set_turning', enabled: false, turns_per_day: 0 });
+    const startStopBtn = el('start_stop_btn');
+    if(startStopBtn) startStopBtn.disabled = true;
+    return;
+  }
+
+  const profileId = parseInt(rawValue, 10);
   if(profileId < 0 || profileId > 37) return;
 
   sendWsCommand({ type: 'set_profile', profile_id: profileId });
   profileSelectEl.dataset.userSelected = 'true';
   /* Next status will prefill manual temp/humidity/turn every (when Manual); applyStatus uses pendingProfilePrefill. */
   pendingProfilePrefill = true;
+  const startStopBtn = el('start_stop_btn');
+  if(startStopBtn) startStopBtn.disabled = false;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -519,29 +612,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const profileSelectEl = el('profileSelect');
   if(profileSelectEl) profileSelectEl.onchange = saveProfile;
+  /* On load, empty option is selected by default; disable Start until a profile is chosen. */
+  const startStopBtnInit = el('start_stop_btn');
+  if(startStopBtnInit && profileSelectEl && profileSelectEl.value === '') startStopBtnInit.disabled = true;
 
   // Initialize timer
   resetTimer();
 
-  // System On/Off: when Off, no lamp/output (sensors still read)
-  const systemEnableSelectEl = el('systemEnableSelect');
-  if(systemEnableSelectEl) systemEnableSelectEl.onchange = () => {
-    const v = systemEnableSelectEl.value;
-    systemEnableSelectEl.dataset.userSelected = 'true';
-    sendWsCommand({ type: 'set_system', enabled: v === '1' });
-  };
-
-  // Mode dropdown (Manual / Egg Holding / Incubation): process state after Profile is chosen
+  // Mode dropdown: only cancel when Manual; Egg Holding/Incubation are selection only (Start button starts)
   const modeSelectEl = el('modeSelect');
+  const profileLabelEl = el('profile_label');
   if(modeSelectEl) modeSelectEl.onchange = () => {
     modeSelectEl.dataset.userSelected = 'true';
     const mode = parseInt(modeSelectEl.value, 10);
-    sendWsCommand({ type: 'set_mode', mode });
-    // When switching to Manual, prefill temp/humidity/turn every from current (selected profile) status so user can tweak
-    if(mode === 0) prefillManualFieldsFromStatus(window._lastStatus);
-    // Show/hide Egg Tilting toggle immediately when Mode changes (Manual = show)
+    if(profileLabelEl) profileLabelEl.textContent = mode === 0 ? 'Preload' : 'Profile';
+    if(mode === 0) sendWsCommand({ type: 'set_mode', mode });
+    else prefillManualFieldsFromStatus(window._lastStatus);
     const eggTiltingToggleWrap = el('egg_tilting_toggle_wrap');
     if(eggTiltingToggleWrap) eggTiltingToggleWrap.style.display = (mode === 0) ? 'inline-flex' : 'none';
+  };
+
+  // Start/Stop: one button; flip UI immediately, then send WS (no wait for confirmation)
+  const startStopBtnEv = el('start_stop_btn');
+  if(startStopBtnEv) startStopBtnEv.onclick = () => {
+    if(startStopBtnEv.classList.contains('stop-state')){
+      startStopBtnEv.textContent = 'Start';
+      startStopBtnEv.classList.remove('stop-state');
+      startStopBtnEv.classList.add('start-state');
+      sendWsCommand({ type: 'set_mode', mode: 0 });
+    } else {
+      /* Start: require a profile selected (no empty option). */
+      const profileEl = el('profileSelect');
+      if(!profileEl || profileEl.value === '') return;
+      const profileId = parseInt(profileEl.value, 10);
+      if(Number.isNaN(profileId) || profileId < 0 || profileId > 37) return;
+      const modeEl = el('modeSelect');
+      const mode = modeEl ? parseInt(modeEl.value, 10) : 1;
+      if(mode === 0) return;
+      startStopBtnEv.textContent = 'Stop';
+      startStopBtnEv.classList.remove('start-state');
+      startStopBtnEv.classList.add('stop-state');
+      sendWsCommand({ type: 'start_process', mode, profile_id: profileId, start_day: 0 });
+    }
   };
 
   // Temp/Humidity target visibility: editable when Mode is Manual, read-only when preset profile
@@ -569,9 +681,33 @@ document.addEventListener('DOMContentLoaded', () => {
   const modeSelectInit = el('modeSelect');
   if(eggTiltingToggleWrapInit && modeSelectInit) eggTiltingToggleWrapInit.style.display = modeSelectInit.value === '0' ? 'inline-flex' : 'none';
 
-  // Tilt now: link after "Next tilt in" – triggers one tilt; schedule continues every X hrs from that point
-  const tiltNowLink = el('tilt_now_link');
-  if(tiltNowLink) tiltNowLink.addEventListener('click', (e) => { e.preventDefault(); sendWsCommand({ type: 'tilt_now' }); });
+  // Tilt now: Next tilt tile (left column) – triggers one tilt; schedule continues from that point
+  const tiltNowTile = el('tilt_now_tile');
+  if(tiltNowTile) tiltNowTile.addEventListener('click', () => { sendWsCommand({ type: 'tilt_now' }); });
+
+  // Mouse-following tooltip for elements with data-tooltip attribute
+  const mouseTooltip = el('mouseTooltip');
+  if(tiltNowTile && mouseTooltip){
+    const tooltipText = tiltNowTile.getAttribute('data-tooltip') || '';
+    tiltNowTile.addEventListener('mouseenter', () => {
+      mouseTooltip.textContent = tooltipText;
+      mouseTooltip.classList.add('visible');
+    });
+    tiltNowTile.addEventListener('mouseleave', () => {
+      mouseTooltip.classList.remove('visible');
+    });
+    tiltNowTile.addEventListener('mousemove', (e) => {
+      mouseTooltip.style.left = (e.clientX + 12) + 'px';
+      mouseTooltip.style.top = (e.clientY - 10) + 'px';
+    });
+  }
+
+  const startIncubationBtn = el('start_incubation_btn');
+  if(startIncubationBtn) startIncubationBtn.addEventListener('click', () => {
+    const last = window._lastStatus;
+    if(!last || !last.active || last.process_type !== 1) return;
+    sendWsCommand({ type: 'start_process', mode: 2, profile_id: last.profile_id ?? 0, start_day: last.day ?? 0 });
+  });
 
   // Manual temp/humidity: 1s debounced save on input; save immediately on blur (cancel debounce)
   const manualTminEl = el('manual_tmin');

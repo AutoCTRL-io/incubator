@@ -63,6 +63,11 @@ static bool info_humidifier = false;
 bool info_system_enabled = true;  /* When false: sensors still read, no lamp/output. Exposed in header for inline getter. */
 static bool manual_rotation_enabled = false;
 static uint16_t manual_turn_interval_hours = 2;  /* Default 2h when Manual turning is enabled. */
+/* Manual mode temp/humidity targets (used when no process active). */
+static float manual_tmin_f = 98.0f;
+static float manual_tmax_f = 100.0f;
+static float manual_hmin = 40.0f;
+static float manual_hmax = 60.0f;
 
 void appstate_setApSsid(const char *ssid)
 {
@@ -228,18 +233,26 @@ void saveProcessState()
 
   prefs.putBool("manualRotationEnabled", manual_rotation_enabled);
   prefs.putUShort("manualTurnIntervalHours", manual_turn_interval_hours);
+  prefs.putFloat("tmin", manual_tmin_f);
+  prefs.putFloat("tmax", manual_tmax_f);
+  prefs.putFloat("hmin", manual_hmin);
+  prefs.putFloat("hmax", manual_hmax);
 
   prefs.end();
 }
 
-/* Custom phases edited via UI later; no-op for now. */
 void appstate_setManualTargets(float tmin, float tmax, float hmin, float hmax)
 {
-  (void)tmin;
-  (void)tmax;
-  (void)hmin;
-  (void)hmax;
+  manual_tmin_f = tmin;
+  manual_tmax_f = tmax;
+  manual_hmin = hmin;
+  manual_hmax = hmax;
 }
+
+float appstate_getManualTminF() { return manual_tmin_f; }
+float appstate_getManualTmaxF() { return manual_tmax_f; }
+float appstate_getManualHmin() { return manual_hmin; }
+float appstate_getManualHmax() { return manual_hmax; }
 
 /* =========================
    Helpers

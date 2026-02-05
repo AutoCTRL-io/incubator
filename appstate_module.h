@@ -171,6 +171,10 @@ const char *appstate_getDisplayMode();
 void saveProcessState();
 void resetProcessState();
 void appstate_setManualTargets(float tmin, float tmax, float hmin, float hmax);
+float appstate_getManualTminF();
+float appstate_getManualTmaxF();
+float appstate_getManualHmin();
+float appstate_getManualHmax();
 bool isCustomProfileActive();
 bool isProcessRunning();
 

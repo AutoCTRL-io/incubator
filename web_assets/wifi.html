@@ -83,6 +83,12 @@
     </label>
   </div>
 
+  <div class="row">
+    <label>OTA password</label>
+    <input id="ota_password" type="password" placeholder="Leave blank to keep current or disable" autocomplete="off"/>
+    <small style="color:var(--muted);font-size:12px">Optional. Required when uploading firmware over the air. Takes effect after save and next boot.</small>
+  </div>
+
   <button onclick="save()">Save & Apply</button>
 
   <div class="row" style="margin-top:14px">
@@ -102,6 +108,9 @@ function load(){
   fetch('/api/wifi').then(r=>r.json()).then(j=>{
     el('ssid').value=j.ssid||'';
     el('keep_ap').checked=!!j.keep_ap;
+    var otaEl=el('ota_password');
+    if (j.ota_password_set) otaEl.placeholder='Leave blank to keep current password';
+    else otaEl.placeholder='Leave blank to keep current or disable';
   });
 
   fetch('/api/wifi/scan').then(r=>r.json()).then(j=>{
@@ -124,7 +133,8 @@ function save(){
     body:JSON.stringify({
       ssid:el('ssid').value,
       pass:el('pass').value,
-      keep_ap:el('keep_ap').checked
+      keep_ap:el('keep_ap').checked,
+      ota_password:el('ota_password').value
     })
   }).then(()=>alert('Saved. Reconnecting…'));
 }

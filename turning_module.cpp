@@ -18,6 +18,8 @@ void turning_configure(bool enabled, uint16_t intervalHours)
   s_intervalHours = intervalHours;
   if (!s_enabled || s_intervalHours == 0) {
     stepperSetTurnsPerDay(0);
+    /* When tilting is turned off (lockdown, manual off, or process end), return platform to flat. */
+    stepperGoToFlat();
     return;
   }
   stepperSetTurnsPerDay((uint32_t)(24 / s_intervalHours));

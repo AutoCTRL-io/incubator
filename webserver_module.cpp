@@ -1,9 +1,13 @@
 #include <Arduino.h>
 #include <WebServer.h>
+#include <WiFi.h>
 #include <FS.h>
 #include <LittleFS.h>
+#include <Preferences.h>
+#include <ArduinoJson.h>
 
 #include "webserver_module.h"
+#include "wifi_module.h"
 
 /* LittleFS paths for uploaded web assets. */
 static const char PATH_INDEX[] = "/index.html";
@@ -46,6 +50,82 @@ void webserver_setup(WebServer &server)
   /* ===== Reachability test ===== */
   server.on("/ping", HTTP_GET, [&]() {
     server.send(200, "text/plain", "OK");
+  });
+
+  /* ===== Settings API: WiFi and OTA password (NVS namespace "incubator") ===== */
+  static const char* NVS_NS = "incubator";
+  static const char* NVS_KEY_OTA_PASS = "ota_pass";
+
+  /* GET /api/wifi -> { ssid, keep_ap, ota_password_set }. Does not return plaintext OTA password. */
+  server.on("/api/wifi", HTTP_GET, [&]() {
+    Preferences prefs;
+    prefs.begin(NVS_NS, true);
+    String ssid = prefs.getString("ssid", "");
+    bool keep_ap = prefs.getBool("keep_ap", true);
+    String otaPass = prefs.getString(NVS_KEY_OTA_PASS, "");
+    prefs.end();
+    StaticJsonDocument<256> doc;
+    doc["ssid"] = ssid;
+    doc["keep_ap"] = keep_ap;
+    doc["ota_password_set"] = (otaPass.length() > 0);
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
+  });
+
+  /* POST /api/wifi -> body { ssid, pass?, keep_ap?, ota_password? }. Saves WiFi creds and optional OTA password to NVS. */
+  server.on("/api/wifi", HTTP_POST, [&]() {
+    if (!server.hasArg("plain")) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"Missing body\"}");
+      return;
+    }
+    StaticJsonDocument<512> doc;
+    DeserializationError err = deserializeJson(doc, server.arg("plain"));
+    if (err) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"Invalid JSON\"}");
+      return;
+    }
+    const char* ssid = doc["ssid"] | "";
+    const char* pass = doc["pass"] | "";
+    bool keep_ap = doc["keep_ap"] | true;
+    const char* ota_password = doc["ota_password"] | "";
+
+    wifiSaveCredentials(ssid, pass);
+
+    Preferences prefs;
+    prefs.begin(NVS_NS, false);
+    prefs.putBool("keep_ap", keep_ap);
+    /* Store OTA password (empty string clears it). Max 63 chars for NVS string. */
+    String op(ota_password);
+    if (op.length() > 63) op = op.substring(0, 63);
+    prefs.putString(NVS_KEY_OTA_PASS, op);
+    prefs.end();
+
+    server.send(200, "application/json", "{\"ok\":true}");
+  });
+
+  /* GET /api/wifi/scan -> { networks: [ { ssid, rssi, enc }, ... ] } */
+  server.on("/api/wifi/scan", HTTP_GET, [&]() {
+    int n = WiFi.scanNetworks(/*async=*/false, /*hidden=*/true);
+    DynamicJsonDocument doc(2048);
+    JsonArray arr = doc.createNestedArray("networks");
+    for (int i = 0; i < n; i++) {
+      JsonObject obj = arr.add<JsonObject>();
+      obj["ssid"] = WiFi.SSID(i);
+      obj["rssi"] = WiFi.RSSI(i);
+      obj["enc"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+    }
+    WiFi.scanDelete();
+    String str;
+    serializeJson(doc, str);
+    server.send(200, "application/json", str);
+  });
+
+  /* POST /api/reset -> reboot device */
+  server.on("/api/reset", HTTP_POST, [&]() {
+    server.send(200, "application/json", "{\"ok\":true}");
+    delay(200);
+    ESP.restart();
   });
 
   /* ===== Main page: from LittleFS if uploaded, else fallback ===== */

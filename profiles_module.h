@@ -18,6 +18,9 @@ struct EggProfileData {
 
   const IncubationPhase *phases;
   uint8_t phaseCount;
+
+  /* Optional egg-holding phase (cool temp, no turning). If null, core uses default. */
+  const IncubationPhase *holdingPhase;
 };
 
 extern const EggProfileData EGG_PROFILES[];
